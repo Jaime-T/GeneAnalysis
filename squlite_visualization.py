@@ -210,14 +210,14 @@ def process_row(row):
 
 def get_gene_acceptor_data(selected_gene = 'SMN2'):
     # Grab custom data
-    conn = sqlite3.connect('/Users/jaimetaitz/cci_internship/junctions.sqlite')
+    conn = sqlite3.connect('/Users/jaimetaitz/cci_internship/GeneAnalysis/junctions.sqlite')
     #conn = sqlite3.connect('/Users/paceramateos/projects/cryptic_exons/data/U1_brana_risdi/jc_custom_STARjunc.sqlite')
 
     # Create a cursor object
     cur = conn.cursor()
 
     ### Input of the app
-    selected_gene = 'SMN2'
+    #selected_gene = 'SMN2'
 
     geneinfo = get_ensembl_gene_info(selected_gene)
 
@@ -296,16 +296,27 @@ def get_gene_acceptor_data(selected_gene = 'SMN2'):
 app = Dash(__name__)
 
 # Generate dropdown options dynamically
-snap_custom, HTT_canonical_acceptors, acceptor_side, donor_side = get_gene_acceptor_data('HTT')
-snap_custom, SMN2_canonical_acceptors, acceptor_side, donor_side = get_gene_acceptor_data('SMN2')
+def get_all_ensembl_genes():
+    with open("./mart_gene_names.txt", "r") as file:
+        lines = file.readlines()
+        gene_names = []
+        for x in lines[1:]:
+            cols = x.split('\t')
+            if len(cols) == 1:
+                continue
+            
+            name = cols[1]
+            if len(name) != 0 and name not in gene_names:
+                name = name.rstrip('\n')
+                gene_names.append(name)
+            
+    return gene_names
 
-all_options = {
-    'HTT': HTT_canonical_acceptors,
-    'SMN2': SMN2_canonical_acceptors
-}
+def get_acceptors_for_gene(gene_name):
+    snap_custom, canonical_acceptors, acceptor_side, donor_side = get_gene_acceptor_data(gene_name)
+    return canonical_acceptors
 
-#canonical_acceptor_options = [{"label": acceptor, "value": acceptor} for canonical_acceptor in get_gene_acceptor_data(gene)]
-gene_options = [{"label": gene, "value": gene} for gene in all_options.keys()]
+gene_options = [{"label": gene, "value": gene} for gene in get_all_ensembl_genes()]
 
 # App layout
 app.layout = html.Div([
@@ -326,7 +337,6 @@ app.layout = html.Div([
                  ),
     
     html.Div(id='output_container', children=[]),
-    html.Br(),
 
     dcc.Graph(id='my_acceptor_map', figure={})
 ])
@@ -335,16 +345,18 @@ app.layout = html.Div([
     Output(component_id='slct_acceptor', component_property='options'),
     [Input(component_id='slct_gene', component_property='value')])
 
+
 def update_acceptor_options(selected_gene):
-    canonical_acceptors = all_options[selected_gene]  # Get acceptors for the selected gene
-    return [{"label": acceptor, "value": acceptor} for acceptor in canonical_acceptors]
+    canonical_acceptors = get_acceptors_for_gene(selected_gene)  # Get acceptors for the selected gene
+    return [{"label": acceptor, "value": acceptor} for acceptor in canonical_acceptors] if canonical_acceptors else []
+
 
 @app.callback(
     Output(component_id='slct_acceptor', component_property='value'),
     Input(component_id='slct_acceptor', component_property='options'))
 
 def set_acceptor_value(available_options):
-    return available_options[0]['value']
+    return available_options[0]['value'] if available_options else None
 
 
 # Connect the Plotly graphs with Dash Components
@@ -383,6 +395,7 @@ def update_graph(slct_acceptor, slct_gene):
     
     if temp_acceptor_custom.shape[0] < 2:
         #continue
+        container = f"The acceptor and gene chosen by user was: {slct_acceptor}, {slct_gene}.\n Not enough data for this acceptor"
         sys.stdout.write('Not enough data')
         return container, None
     
