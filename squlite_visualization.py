@@ -210,7 +210,7 @@ def process_row(row):
 
 def get_gene_acceptor_data(selected_gene = 'SMN2'):
     # Grab custom data
-    conn = sqlite3.connect('/Users/jaimetaitz/cci_internship/junctions.sqlite')
+    conn = sqlite3.connect('/Users/jaimetaitz/cci_internship/GeneAnalysis/junctions.sqlite')
     #conn = sqlite3.connect('/Users/paceramateos/projects/cryptic_exons/data/U1_brana_risdi/jc_custom_STARjunc.sqlite')
 
     # Create a cursor object
@@ -316,8 +316,6 @@ def get_acceptors_for_gene(gene_name):
     snap_custom, canonical_acceptors, acceptor_side, donor_side = get_gene_acceptor_data(gene_name)
     return canonical_acceptors
 
-
-#gene_options = [{"label": gene, "value": gene} for gene in all_options.keys()]
 gene_options = [{"label": gene, "value": gene} for gene in get_all_ensembl_genes()]
 
 # App layout
@@ -339,7 +337,6 @@ app.layout = html.Div([
                  ),
     
     html.Div(id='output_container', children=[]),
-    html.Br(),
 
     dcc.Graph(id='my_acceptor_map', figure={})
 ])
@@ -353,14 +350,14 @@ def update_acceptor_options(selected_gene):
     canonical_acceptors = get_acceptors_for_gene(selected_gene)  # Get acceptors for the selected gene
     return [{"label": acceptor, "value": acceptor} for acceptor in canonical_acceptors] if canonical_acceptors else []
 
-'''
+
 @app.callback(
     Output(component_id='slct_acceptor', component_property='value'),
     Input(component_id='slct_acceptor', component_property='options'))
 
 def set_acceptor_value(available_options):
     return available_options[0]['value'] if available_options else None
-'''
+
 
 # Connect the Plotly graphs with Dash Components
 @app.callback(
