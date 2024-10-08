@@ -353,8 +353,6 @@ def calc_LR(alpha_estimates, raw_sample, prior_count=1):
 
 
 def get_needle_value(mean, indiv_sample):
-    print('added here')
-    print(mean, indiv_sample)
     bayes_factor = calc_LR(mean,indiv_sample,7)
     needle_value = 1/bayes_factor
     return needle_value
@@ -580,35 +578,28 @@ def update_needleplot(selected_gene):
     y = []
 
     # find needleplot values using the raw data (statistical significance of results)
-    for count, acceptor in enumerate(canonical_acceptor):
-        start = acceptor
-        end = start+10
-        coord = str(start) + '-' + str(end)
-        domains.append({"name": str(acceptor), "coord": coord})
 
+    for acceptor in canonical_acceptor:
+        
         samples_raw_data = raw_data(selected_gene, acceptor)
 
         if isinstance(samples_raw_data, pd.DataFrame):
             acceptor_mean = samples_raw_data.mean(axis=0)
-            acceptor_mean_array = np.array(acceptor_mean)
         else:
-            print(f"Not a dataframe, skipping this acceptor {acceptor}", type(samples_raw_data))
+            # print(f"Not a dataframe, skipping this acceptor {acceptor}", type(samples_raw_data))
             continue
 
         # for each sample in an acceptor, get the needle value 
         # and find the maximum needle value for each acceptor 
-        max_needle = -math.inf
-
-        for index, row in samples_raw_data.iterrows():
-
-            indiv_sample_array = np.array(row) # individual rows' results, to be fed into needle
-            needle = get_needle_value(acceptor_mean_array, indiv_sample_array)
-
-            if needle > max_needle:
-                max_needle = needle
+        needle_values = samples_raw_data.apply(lambda row: get_needle_value(acceptor_mean, row), axis=1)
+        print(needle_values)
+        max_needle = needle_values.max()
+        print(max_needle)
 
         x.append(str(acceptor))
         y.append(max_needle)
+        coord = str(acceptor) + '-' + str(acceptor + 10)
+        domains.append({"name": str(acceptor), "coord": coord})
 
     plot_data = {"x": x, 
                 "y": y, 
