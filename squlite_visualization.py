@@ -579,52 +579,34 @@ def update_needleplot(selected_gene):
     x = []
     y = []
 
-    # TO DO: find actual needleplot values using the raw data (statistical significance of results)
+    # find needleplot values using the raw data (statistical significance of results)
     for count, acceptor in enumerate(canonical_acceptor):
         start = acceptor
         end = start+10
         coord = str(start) + '-' + str(end)
         domains.append({"name": str(acceptor), "coord": coord})
-       
 
         samples_raw_data = raw_data(selected_gene, acceptor)
-        #if samples == {}:
-        #    y.append(0)
-         #   continue
 
-        print(selected_gene, acceptor)
-        print(samples_raw_data)
-
-        #acceptor_mean = mean_acceptor(samples_raw_data)
         if isinstance(samples_raw_data, pd.DataFrame):
             acceptor_mean = samples_raw_data.mean(axis=0)
-        
+            acceptor_mean_array = np.array(acceptor_mean)
         else:
             print(f"Not a dataframe, skipping this acceptor {acceptor}", type(samples_raw_data))
             continue
 
-        print(acceptor_mean)
-        acceptor_mean_array = np.array(acceptor_mean)
-        
-        print(acceptor_mean_array)
-
         # for each sample in an acceptor, get the needle value 
-        # and find average needle value for each acceptor 
+        # and find the maximum needle value for each acceptor 
         max_needle = -math.inf
 
         for index, row in samples_raw_data.iterrows():
 
             indiv_sample_array = np.array(row) # individual rows' results, to be fed into needle
-            print(indiv_sample_array)
-
             needle = get_needle_value(acceptor_mean_array, indiv_sample_array)
-            print('needle value is....' + str(needle))
+
             if needle > max_needle:
                 max_needle = needle
-                print('new needle value is:' + str(max_needle))
-            
 
-        print('max needle value is:' + str(max_needle))
         x.append(str(acceptor))
         y.append(max_needle)
 
@@ -632,7 +614,6 @@ def update_needleplot(selected_gene):
                 "y": y, 
                 "domains": domains}
     
-    print(plot_data)
     return plot_data
 
 
@@ -668,9 +649,7 @@ def click_acceptor(clickData):
         sys.stdout.write(f'Error accessing x value: {e}\n')
         return None
 
-    
     sys.stdout.write('x is' + str(x) + '\n')
-    #print('the acceptor value is now : ' + str(x))
     return int(x)
 
 
@@ -682,15 +661,6 @@ def click_acceptor(clickData):
 def update_acceptor_options(selected_gene):
     canonical_acceptors = get_acceptors_for_gene(selected_gene)  # Get acceptors for the selected gene
     return [{"label": acceptor, "value": acceptor} for acceptor in canonical_acceptors] if canonical_acceptors else []
-
-'''
-@app.callback(
-    Output(component_id='slct_acceptor', component_property='value'),
-    Input(component_id='slct_acceptor', component_property='options'))
-
-def set_acceptor_value(available_options):
-    return available_options[0]['value'] if available_options else None
-'''
 
 # Connect the Plotly graphs with Dash Components
 @app.callback(
