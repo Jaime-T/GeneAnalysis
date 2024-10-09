@@ -7,7 +7,8 @@ Created on Wednesday 18 Sep
 
 Description: Added GUI with Plotly Dash
 
-Notes: Change the SQLite connection depending on where you store the dataset 
+Notes: Change the SQLite connection depending on where you store the dataset: 
+        get_gene_acceptor_data connects to the database of choice
 """
 
 import pandas as pd
@@ -24,9 +25,29 @@ import dash_bio as dashbio
 from scipy import special
 import json
 from concurrent.futures import ThreadPoolExecutor
-import time
 
-MAX_NEEDLEPLOT_VALUE = 200
+description_data = """
+SRR15622469 - DMSO control_1
+SRR15622470 - DMSO control_2
+SRR15622463 - DMSO control_3
+SRR15622468 - Treated with 40 nM branaplam_1
+SRR15622467 - Treated with 40 nM branaplam_2
+SRR15622456 - Treated with 40 nM branaplam_3
+SRR15622461 - Treated with 1000 nM risdiplam_1
+SRR15622460 - Treated with 1000 nM risdiplam_2
+SRR15622462 - Treated with 1000 nM risdiplam_3
+SRR8697000 - HEK293T_U1Mut_1
+SRR8697001 - HEK293T_U1Mut_2
+SRR8697002 - HEK293T_U1WT_1
+SRR8697003 - HEK293T_U1WT_2
+"""
+
+lines = description_data.strip().split('\n')
+cleaned_lines = [item.strip() for item in lines]
+# Split each line into two parts and create a list of tuples
+data_tuples = [tuple(line.split(' - ')) for line in cleaned_lines]
+# Create a DataFrame from the list of tuples
+sample_condition = dict(data_tuples)
 
 # get gene info, use either ensembl id or gene symbol at input
 def get_ensembl_gene_info(goi='KRAS'):
@@ -41,7 +62,6 @@ def get_ensembl_gene_info(goi='KRAS'):
         r.raise_for_status()
         sys.exit()
     output = r.json()
-    
     return output
 
 
@@ -178,7 +198,6 @@ def process_drug_acceptor_data_raw(temp_acceptor_custom):
     reads_df = pd.DataFrame(reads_per_start_per_sample).fillna(0)
     reads_df.reset_index(inplace=True)
     reads_df.rename(columns={'index': 'Samples'}, inplace=True)
-
     return reads_df
 
 def plot_distributions_data(data):
@@ -203,7 +222,6 @@ def plot_distributions_data(data):
     plt.tight_layout()
     plt.show()
 
-
 def process_row(row):
     items = row.split(',')
     result = {}
@@ -222,8 +240,6 @@ def get_gene_acceptor_data(selected_gene = 'SMN2'):
     cur = conn.cursor()
 
     ### Input of the app
-    #selected_gene = 'SMN2'
-
     geneinfo = get_ensembl_gene_info(selected_gene)
 
     # get intron positions of canonical transcript
@@ -286,7 +302,6 @@ def get_gene_acceptor_data(selected_gene = 'SMN2'):
         right_seq = exon_seq+1
 
     canonical_acceptor = snap_custom.loc[snap_custom.transcript_name != 'non-canonical', acceptor_side].tolist()
-    #print(snap_custom['samples'])
     
     return snap_custom, canonical_acceptor, acceptor_side, donor_side
     #canonical_donor    = snap_custom.loc[snap_custom.transcript_name != 'non-canonical', donor_side].tolist()
@@ -298,30 +313,6 @@ def get_gene_acceptor_data(selected_gene = 'SMN2'):
 ### controls
 ### HTT k=47
 ### SMN2 k=7
-
-description_data = """
-SRR15622469 - DMSO control_1
-SRR15622470 - DMSO control_2
-SRR15622463 - DMSO control_3
-SRR15622468 - Treated with 40 nM branaplam_1
-SRR15622467 - Treated with 40 nM branaplam_2
-SRR15622456 - Treated with 40 nM branaplam_3
-SRR15622461 - Treated with 1000 nM risdiplam_1
-SRR15622460 - Treated with 1000 nM risdiplam_2
-SRR15622462 - Treated with 1000 nM risdiplam_3
-SRR8697000 - HEK293T_U1Mut_1
-SRR8697001 - HEK293T_U1Mut_2
-SRR8697002 - HEK293T_U1WT_1
-SRR8697003 - HEK293T_U1WT_2
-"""
-
-lines = description_data.strip().split('\n')
-cleaned_lines = [item.strip() for item in lines]
-# Split each line into two parts and create a list of tuples
-data_tuples = [tuple(line.split(' - ')) for line in cleaned_lines]
-# Create a DataFrame from the list of tuples
-sample_condition = dict(data_tuples)
-
 
 ## Needle Values 
 def calc_lnlr(r1, r2, alpha = None):
@@ -358,18 +349,13 @@ def get_needle_value(mean, indiv_sample):
     needle_value = 1/bayes_factor
     return needle_value
 
-# example 
-mean = np.array([1,2,30])
-indiv_sample = np.array([3,40,30])
-
 # Raw data for each acceptor of a gene
 def raw_data(snap_custom,  acceptor_side, donor_side, slct_acceptor):
     
     temp_acceptor_custom = snap_custom[snap_custom[acceptor_side] == slct_acceptor] # changed this based on user input 
     
     if temp_acceptor_custom.shape[0] < 2:
-    #continue
-        sys.stdout.write('Not enough data\n')
+        # not enough data
         return {} 
 
     temp_acceptor_custom_annotation = temp_acceptor_custom[[donor_side,'annotation']]
@@ -410,7 +396,6 @@ def heatmap(slct_gene, slct_acceptor):
             container = "Choose an acceptor. Click a point on the needleplot, or select from dropdown options"
         else:
             container = f"The acceptor and gene chosen by user was: {slct_acceptor}, {slct_gene}.\n Not enough data for this acceptor"
-            sys.stdout.write('Not enough data\n')
         return {}, {}, container
     
     if temp_acceptor_custom.strand.tolist()[0] == '+':
@@ -525,11 +510,20 @@ app.layout = html.Div([
         clearable=False,
         multi=False,
         value=1,
-        style={'width': '400px'}
+        style={'width': "40%"}
     ),
 
-    # Needle plot
     html.H1("NeedlePlot"),
+    
+    html.P("Maximum needle value:"),
+    dcc.Dropdown(
+        id='needleplot_max',
+        options=[{"label": num, "value": num} for num in range(100,1100,100)],
+        value=200,
+        multi=False,
+        style={'width': "40%"}
+    ),
+
     html.P("Click on an intron of interest", style={'color': 'blue', 'fontSize': 15}),
 
     dashbio.NeedlePlot(
@@ -539,8 +533,7 @@ app.layout = html.Div([
         ylabel='Score',
         width=1000,
         domainStyle={
-        'displayMinorDomains': True,
-        'yAxisRange': [0, 200] }
+        'displayMinorDomains': True}
     ),
 
     dcc.Dropdown(id="slct_acceptor",
@@ -550,7 +543,7 @@ app.layout = html.Div([
                  style={'width': "40%"}
                  ),
     
-    html.Div(id='output_container', children=[]),
+    html.Div(id='output_container', children=[], style={'color': 'blue'}),
 
     # Heat map
     html.H1("Heat Map"),
@@ -566,12 +559,12 @@ app.layout = html.Div([
 def update_needleplot(show_rangeslider):
     return True if show_rangeslider else False
 
-
 @app.callback(
     Output(component_id='gene-needleplot', component_property='mutationData'),
-    Input(component_id='slct_gene', component_property='value'))
+    [Input(component_id='slct_gene', component_property='value'), 
+     Input(component_id='needleplot_max', component_property='value')])
 
-def update_needleplot(selected_gene):
+def update_needleplot(selected_gene, needle_max):
     snap_custom, canonical_acceptors, acceptor_side, donor_side = get_gene_acceptor_data(selected_gene)
     if len(canonical_acceptors) == 0:
         return needle_sample_data
@@ -603,9 +596,8 @@ def update_needleplot(selected_gene):
         domains.append({"name": str(acceptor), "coord": coord})
 
     plot_data = {"x": x, 
-                "y": [min(y_val, MAX_NEEDLEPLOT_VALUE) for y_val in y], 
+                "y": [min(y_val, needle_max) for y_val in y], 
                 "domains": domains}
-    
     return plot_data
 
 
@@ -632,8 +624,6 @@ def click_acceptor(clickData):
     if not isinstance(clickData, dict):
         sys.stdout.write('Error: clickData must be a dictionary\n')
         return None
-    
-    print(clickData)
 
     try:
         x = clickData['points'][0]['x']
@@ -641,7 +631,6 @@ def click_acceptor(clickData):
         sys.stdout.write(f'Error accessing x value: {e}\n')
         return None
 
-    sys.stdout.write('x is' + str(x) + '\n')
     return int(x)
 
 
@@ -654,14 +643,13 @@ def update_acceptor_options(selected_gene):
     canonical_acceptors = get_acceptors_for_gene(selected_gene)  # Get acceptors for the selected gene
     return [{"label": acceptor, "value": acceptor} for acceptor in canonical_acceptors] if canonical_acceptors else []
 
-# Connect the Plotly graphs with Dash Components
+# Heatmap 
 @app.callback(
     [Output(component_id='output_container', component_property='children'),
      Output(component_id='my_acceptor_map', component_property='figure')],
     [Input(component_id='slct_acceptor', component_property='value'),
      Input(component_id='slct_gene', component_property='value')]
 )
-
 
 def update_graph(slct_acceptor, slct_gene):
     print(f"Acceptor: {slct_acceptor}, Gene: {slct_gene}")
