@@ -21,9 +21,12 @@ import seaborn as sns
 import plotly.express as px
 from dash import Dash, html, dcc, Input, Output
 import dash_bio as dashbio
-import json
 from scipy import special
-import math
+import json
+from concurrent.futures import ThreadPoolExecutor
+import time
+
+MAX_NEEDLEPLOT_VALUE = 200
 
 # get gene info, use either ensembl id or gene symbol at input
 def get_ensembl_gene_info(goi='KRAS'):
@@ -285,8 +288,6 @@ def get_gene_acceptor_data(selected_gene = 'SMN2'):
     canonical_acceptor = snap_custom.loc[snap_custom.transcript_name != 'non-canonical', acceptor_side].tolist()
     #print(snap_custom['samples'])
     
-
-
     return snap_custom, canonical_acceptor, acceptor_side, donor_side
     #canonical_donor    = snap_custom.loc[snap_custom.transcript_name != 'non-canonical', donor_side].tolist()
     #canonical_lengths  = snap_custom.loc[snap_custom.transcript_name != 'non-canonical'].length.tolist()
@@ -362,23 +363,21 @@ mean = np.array([1,2,30])
 indiv_sample = np.array([3,40,30])
 
 # Raw data for each acceptor of a gene
-def raw_data(slct_gene, slct_acceptor):
+def raw_data(snap_custom,  acceptor_side, donor_side, slct_acceptor):
     
-    snap_custom, canonical_acceptor, acceptor_side, donor_side = get_gene_acceptor_data(slct_gene)
     temp_acceptor_custom = snap_custom[snap_custom[acceptor_side] == slct_acceptor] # changed this based on user input 
     
+    if temp_acceptor_custom.shape[0] < 2:
+    #continue
+        sys.stdout.write('Not enough data\n')
+        return {} 
+
     temp_acceptor_custom_annotation = temp_acceptor_custom[[donor_side,'annotation']]
     temp_acceptor_custom_annotation.loc[:,'annotation'] = np.where(
     temp_acceptor_custom_annotation['annotation'] != 'non-canonical',
     'canonical',  # This will be set if condition is True
     'non-canonical'  # This will be set if condition is False
     )
-    
-    if temp_acceptor_custom.shape[0] < 2:
-        #continue
-        container = f"The acceptor and gene chosen by user was: {slct_acceptor}, {slct_gene}.\n Not enough data for this acceptor"
-        sys.stdout.write('Not enough data\n')
-        return {}, {}, container
     
     if temp_acceptor_custom.strand.tolist()[0] == '+':
         acceptor_name = temp_acceptor_custom.end.iloc[0]
@@ -407,8 +406,11 @@ def heatmap(slct_gene, slct_acceptor):
     
     if temp_acceptor_custom.shape[0] < 2:
         #continue
-        container = f"The acceptor and gene chosen by user was: {slct_acceptor}, {slct_gene}.\n Not enough data for this acceptor"
-        sys.stdout.write('Not enough data\n')
+        if slct_acceptor is None:
+            container = "Choose an acceptor. Click a point on the needleplot, or select from dropdown options"
+        else:
+            container = f"The acceptor and gene chosen by user was: {slct_acceptor}, {slct_gene}.\n Not enough data for this acceptor"
+            sys.stdout.write('Not enough data\n')
         return {}, {}, container
     
     if temp_acceptor_custom.strand.tolist()[0] == '+':
@@ -418,7 +420,6 @@ def heatmap(slct_gene, slct_acceptor):
     
     custom_data_raw = process_drug_acceptor_data_raw(temp_acceptor_custom)
    
-    
     # Make a df with the proportion numbers
     numeric_columns = custom_data_raw.columns.drop('Samples')
     row_sums = custom_data_raw[numeric_columns].sum(axis=1)
@@ -538,7 +539,8 @@ app.layout = html.Div([
         ylabel='Score',
         width=1000,
         domainStyle={
-        'displayMinorDomains': True}
+        'displayMinorDomains': True,
+        'yAxisRange': [0, 200] }
     ),
 
     dcc.Dropdown(id="slct_acceptor",
@@ -570,29 +572,28 @@ def update_needleplot(show_rangeslider):
     Input(component_id='slct_gene', component_property='value'))
 
 def update_needleplot(selected_gene):
-    snap_custom, canonical_acceptor, acceptor_side, donor_side = get_gene_acceptor_data(selected_gene)
-    if len(canonical_acceptor) == 0:
+    snap_custom, canonical_acceptors, acceptor_side, donor_side = get_gene_acceptor_data(selected_gene)
+    if len(canonical_acceptors) == 0:
         return needle_sample_data
+    
     domains = []
     x = []
     y = []
 
-    # find needleplot values using the raw data (statistical significance of results)
-
-    for acceptor in canonical_acceptor:
+    for acceptor in canonical_acceptors:
         
-        samples_raw_data = raw_data(selected_gene, acceptor)
+        # find needleplot values using the raw data (statistical significance of results)
+        samples_raw_data = raw_data(snap_custom, acceptor_side, donor_side, acceptor)
 
         if isinstance(samples_raw_data, pd.DataFrame):
             acceptor_mean = samples_raw_data.mean(axis=0)
         else:
-            # print(f"Not a dataframe, skipping this acceptor {acceptor}", type(samples_raw_data))
+            # if not a dataframe, means no info, so skip acceptor 
             continue
 
         # for each sample in an acceptor, get the needle value 
         # and find the maximum needle value for each acceptor 
         needle_values = samples_raw_data.apply(lambda row: get_needle_value(acceptor_mean, row), axis=1)
-        print(needle_values)
         max_needle = needle_values.max()
         print(max_needle)
 
@@ -602,7 +603,7 @@ def update_needleplot(selected_gene):
         domains.append({"name": str(acceptor), "coord": coord})
 
     plot_data = {"x": x, 
-                "y": y, 
+                "y": [min(y_val, MAX_NEEDLEPLOT_VALUE) for y_val in y], 
                 "domains": domains}
     
     return plot_data
