@@ -24,23 +24,43 @@ from dash import Dash, html, dcc, Input, Output
 import dash_bio as dashbio
 from scipy import special
 import json
-from concurrent.futures import ThreadPoolExecutor
+import math
 
 description_data = """
-SRR15622469 - DMSO control_1
-SRR15622470 - DMSO control_2
-SRR15622463 - DMSO control_3
-SRR15622468 - Treated with 40 nM branaplam_1
-SRR15622467 - Treated with 40 nM branaplam_2
-SRR15622456 - Treated with 40 nM branaplam_3
-SRR15622461 - Treated with 1000 nM risdiplam_1
-SRR15622460 - Treated with 1000 nM risdiplam_2
-SRR15622462 - Treated with 1000 nM risdiplam_3
-SRR8697000 - HEK293T_U1Mut_1
-SRR8697001 - HEK293T_U1Mut_2
-SRR8697002 - HEK293T_U1WT_1
-SRR8697003 - HEK293T_U1WT_2
-"""
+ SRR15622469 - DMSO control_1
+ SRR15622470 - DMSO control_2
+ SRR15622463 - DMSO control_3
+ SRR15622468 - Treated with 40 nM branaplam_1
+ SRR15622467 - Treated with 40 nM branaplam_2
+ SRR15622456 - Treated with 40 nM branaplam_3
+ SRR15622461 - Treated with 1000 nM risdiplam_1
+ SRR15622460 - Treated with 1000 nM risdiplam_2
+ SRR15622462 - Treated with 1000 nM risdiplam_3
+ SRR8697000 - HEK293T_U1Mut_1
+ SRR8697001 - HEK293T_U1Mut_2
+ SRR8697002 - HEK293T_U1WT_1
+ SRR8697003 - HEK293T_U1WT_2
+ SRR5206789 - Treated_SMA_404
+ SRR5206788 - Treated_SMA_403
+ SRR5206787 - Treated_SMA_402
+ SRR5206786 - Treated_SMA_401
+ SRR5206785 - Control_SMA_02
+ SRR5206784 - Control_SMA_01
+ SRR5206783 - Control_FB13c2
+ SRR5206782 - Control_FB13c1
+ SRR9674472 - MEC1_RNU1_3_WT_B
+ SRR9674471 - MEC1_RNU1_3_AC_B
+ SRR9674470 - MEC1_RNU1_3_WT_A
+ SRR9674469 - MEC1_RNU1_3_AC_A
+ SRR9674468 - HG3_RNU1_3_WT_B
+ SRR9674467 - HG3_RNU1_3_AC_B
+ SRR9674466 - HG3_RNU1_3_WT_A
+ SRR9674465 - HG3_RNU1_3_AC_A
+ SRR9674464 - JVM3_RNU1_3_WT_B
+ SRR9674463 - JVM3_RNU1_3_AC_B
+ SRR9674462 - JVM3_RNU1_3_WT_A
+ SRR9674461 - JVM3_RNU1_3_AC_A
+ """
 
 lines = description_data.strip().split('\n')
 cleaned_lines = [item.strip() for item in lines]
@@ -233,7 +253,7 @@ def process_row(row):
 
 def get_gene_acceptor_data(selected_gene = 'SMN2'):
     # Grab custom data
-    conn = sqlite3.connect('/Users/jaimetaitz/cci_internship/jc_custom_STARjunc.sqlite')
+    conn = sqlite3.connect('/Users/jaimetaitz/cci_internship/GeneAnalysis/jc_custom_STARjunc.sqlite')
     #conn = sqlite3.connect('/Users/paceramateos/projects/cryptic_exons/data/U1_brana_risdi/jc_custom_STARjunc.sqlite')
 
     # Create a cursor object
@@ -432,7 +452,7 @@ def heatmap(slct_gene, slct_acceptor):
     
     # Plotly Express heatmap
     fig = px.imshow(heatmap_data, 
-                    labels=dict(x="Acceptor sites", y="Sample ID", colour="Proportion"),
+                    labels=dict(x="Acceptor sites", y="Sample ID", color="Proportion"),
                     x=custom_xtick_labels,
                     y=heatmap_data.index,
                     text_auto=".2f", 
@@ -524,6 +544,15 @@ app.layout = html.Div([
         style={'width': "40%"}
     ),
 
+    html.P("Needle value options:"),
+    dcc.Dropdown(
+        id='needleplot_option',
+        options=[{"label": "Actual", "value": "actual"}, {"label": "Log", "value": "log"}],
+        value="actual",
+        multi=False,
+        style={'width': "40%"}
+    ),
+
     html.P("Click on an intron of interest", style={'color': 'blue', 'fontSize': 15}),
 
     dashbio.NeedlePlot(
@@ -562,9 +591,10 @@ def update_needleplot(show_rangeslider):
 @app.callback(
     Output(component_id='gene-needleplot', component_property='mutationData'),
     [Input(component_id='slct_gene', component_property='value'), 
-     Input(component_id='needleplot_max', component_property='value')])
+     Input(component_id='needleplot_max', component_property='value'),
+     Input(component_id='needleplot_option', component_property='value')])
 
-def update_needleplot(selected_gene, needle_max):
+def update_needleplot(selected_gene, needle_max, needle_option):
     snap_custom, canonical_acceptors, acceptor_side, donor_side = get_gene_acceptor_data(selected_gene)
     if len(canonical_acceptors) == 0:
         return needle_sample_data
@@ -587,16 +617,23 @@ def update_needleplot(selected_gene, needle_max):
         # for each sample in an acceptor, get the needle value 
         # and find the maximum needle value for each acceptor 
         needle_values = samples_raw_data.apply(lambda row: get_needle_value(acceptor_mean, row), axis=1)
-        max_needle = needle_values.max()
-        print(max_needle)
+        highest_needle = needle_values.max()
 
         x.append(str(acceptor))
-        y.append(max_needle)
-        coord = str(acceptor) + '-' + str(acceptor + 10)
+
+        if needle_option == 'log':
+            y.append(math.log(float(highest_needle)))
+            print(math.log(float(highest_needle)))
+        
+        else:
+            y.append(min(highest_needle, needle_max))
+            print(min(highest_needle, needle_max))
+
+        coord = str(acceptor) + '-' + str(acceptor + 100)
         domains.append({"name": str(acceptor), "coord": coord})
 
     plot_data = {"x": x, 
-                "y": [min(y_val, needle_max) for y_val in y], 
+                "y": y, 
                 "domains": domains}
     return plot_data
 
