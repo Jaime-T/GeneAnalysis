@@ -3,7 +3,7 @@
 """
 Created on Wednesday 18 Sep
 
-@author: Pablo Acera Mateos. Jaime Taitz added GUI functionality
+@author: Analysis by Pablo Acera Mateos. GUI functionality by Jaime Taitz  
 
 Description: Added GUI with Plotly Dash
 
@@ -60,7 +60,27 @@ description_data = """
  SRR9674463 - JVM3_RNU1_3_AC_B
  SRR9674462 - JVM3_RNU1_3_WT_A
  SRR9674461 - JVM3_RNU1_3_AC_A
+ SRR10485752 - hela_overexpression_1.5ug
+ SRR10485751 - hela_overexpression_1ug
+ SRR10485750 - hela_overexpression_control
+ SRR10485749 - U1AMO_62.5pmol
+ SRR10485748 - U1AMO_12.5pmol
+ SRR10485747 - cAMO_for_U1AMO
  """
+
+experiments = {
+    'Treated with 40 nM branaplam': 'DMSO control',
+    'Treated with 1000 nM risdiplam': 'DMSO control',
+    'HEK293T_U1Mut': 'HEK293T_U1WT',
+    'Treated_SMA': 'Control_FB13',
+    'MEC1_RNU1_3_AC': 'MEC1_RNU1_3_WT',
+    'HG3_RNU1_3_AC': 'HG3_RNU1_3_WT',
+    'JVM3_RNU1_3_AC': 'JVM3_RNU1_3_WT',
+    'hela_overexpression_1.5ug': 'hela_overexpression_control',
+    'hela_overexpression_1ug': 'hela_overexpression_control',
+    'U1AMO_62.5pmol': 'cAMO_for_U1AMO',
+    'U1AMO_12.5pmol': 'cAMO_for_U1AMO'
+}
 
 lines = description_data.strip().split('\n')
 cleaned_lines = [item.strip() for item in lines]
@@ -68,6 +88,7 @@ cleaned_lines = [item.strip() for item in lines]
 data_tuples = [tuple(line.split(' - ')) for line in cleaned_lines]
 # Create a DataFrame from the list of tuples
 sample_condition = dict(data_tuples)
+#print(sample_condition)
 
 # get gene info, use either ensembl id or gene symbol at input
 def get_ensembl_gene_info(goi='KRAS'):
@@ -393,6 +414,7 @@ def raw_data(snap_custom,  acceptor_side, donor_side, slct_acceptor):
     custom_data_raw = process_drug_acceptor_data_raw(temp_acceptor_custom)
     data = custom_data_raw.set_index('Samples')
     raw_data = pd.DataFrame(data)
+    #print(raw_data)
     return raw_data
 
 
@@ -510,13 +532,14 @@ needle_sample_data = {
 # App layout
 app.layout = html.Div([
     html.H1("Proportion of Counts in an Acceptor", style={'text-align': 'center'}),
+
     html.P("Select Gene:"),
 
     dcc.Dropdown(id="slct_gene",
                  options=gene_options,
                  multi=False,
                  value='SMN2', # default value
-                 style={'width': "40%"}
+                 style={'width': "40%", 'display':'inline-block'}
                  ),
 
     html.P("Show or hide range slider:"),
@@ -608,7 +631,40 @@ def update_needleplot(selected_gene, needle_max, needle_option):
         # find needleplot values using the raw data (statistical significance of results)
         samples_raw_data = raw_data(snap_custom, acceptor_side, donor_side, acceptor)
 
+        #Samples column index is SRR id 
+
         if isinstance(samples_raw_data, pd.DataFrame):
+            new_index = [sample_condition.get(i,i) for i in samples_raw_data.index] 
+            samples_raw_data.index = new_index
+            print(samples_raw_data)
+
+            # find average for controls and treatments
+            avgs = {}
+            for exp in experiments:
+
+                treatment_rows = samples_raw_data[samples_raw_data.index.str.contains(rf'^{exp}')]
+                if len(treatment_rows) < 1:
+                    continue
+                #print('treatment rows:' + x)
+                #print(treatment_rows)
+
+                control_rows = samples_raw_data[samples_raw_data.index.str.contains(rf'^{experiments[exp]}')]
+                if len(control_rows) < 1:
+                    continue
+                #print('control rows' + experiments[x])
+                #print(control_rows)
+
+                treatment_avg = treatment_rows.mean(axis=0)
+                #print('treatment avg below:')
+                #print(treatment_avg)
+                control_avg = control_rows.mean(axis=0)
+                #print('control avg below:')
+                #print(control_avg)
+
+                avgs[str(exp)] = [treatment_avg, control_avg]
+
+            print(avgs)
+
             acceptor_mean = samples_raw_data.mean(axis=0)
         else:
             # if not a dataframe, means no info, so skip acceptor 
@@ -616,8 +672,11 @@ def update_needleplot(selected_gene, needle_max, needle_option):
 
         # for each sample in an acceptor, get the needle value 
         # and find the maximum needle value for each acceptor 
-        needle_values = samples_raw_data.apply(lambda row: get_needle_value(acceptor_mean, row), axis=1)
-        highest_needle = needle_values.max()
+        needle_values = [get_needle_value(arr[0], arr[1]) for arr in avgs.values()]
+        print(needle_values)
+        #needle_values = samples_raw_data.apply(lambda row: get_needle_value(acceptor_mean, row), axis=1)
+        highest_needle = max(needle_values) #.max()
+        print('highest needle value is: ' + str(highest_needle))
 
         x.append(str(acceptor))
 
