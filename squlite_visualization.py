@@ -68,19 +68,53 @@ description_data = """
  SRR10485747 - cAMO_for_U1AMO
  """
 
-experiments = {
-    'Treated with 40 nM branaplam': 'DMSO control',
-    'Treated with 1000 nM risdiplam': 'DMSO control',
-    'HEK293T_U1Mut': 'HEK293T_U1WT',
-    'Treated_SMA': 'Control_FB13',
-    'MEC1_RNU1_3_AC': 'MEC1_RNU1_3_WT',
-    'HG3_RNU1_3_AC': 'HG3_RNU1_3_WT',
-    'JVM3_RNU1_3_AC': 'JVM3_RNU1_3_WT',
-    'hela_overexpression_1.5ug': 'hela_overexpression_control',
-    'hela_overexpression_1ug': 'hela_overexpression_control',
-    'U1AMO_62.5pmol': 'cAMO_for_U1AMO',
-    'U1AMO_12.5pmol': 'cAMO_for_U1AMO'
-}
+experiments = [
+    {
+        "control": ["SRR15622469", "SRR15622470", "SRR15622463"],
+        "treatment": ["SRR15622468", "SRR15622467", "SRR15622456"],
+        "label": "DMSO vs 40 nM branaplam"
+    },
+    {
+        "control": ["SRR15622469", "SRR15622470", "SRR15622463"],
+        "treatment": ["SRR15622461", "SRR15622460", "SRR15622462"],
+        "label": "DMSO vs 1000 nM risdiplam"
+    },
+    {
+        "control": ["SRR8697000", "SRR8697001"],
+        "treatment": ["SRR8697002", "SRR8697003"],
+        "label": "HEK293T_U1Mut vs HEK293T_U1WT"
+    },
+    {
+        "control": ["SRR5206783", "SRR5206782"],
+        "treatment": ["SRR5206789", "SRR5206788", "SRR5206787", "SRR5206786"],
+        "label": "Treated_SMA vs Control_FB13"
+    },
+    {
+        "control": ["SRR9674472", "SRR9674470"],
+        "treatment": ["SRR9674471", "SRR9674469"],
+        "label": "MEC1_RNU1_3_WT vs MEC1_RNU1_3_AC"
+    },
+    {
+        "control": ["SRR9674468", "SRR9674466"],
+        "treatment": ["SRR9674467", "SRR9674465"],
+        "label": "HG3_RNU1_3_WT vs HG3_RNU1_3_AC"
+    },
+    {
+        "control": ["SRR9674464", "SRR9674462"],
+        "treatment": ["SRR9674463", "SRR9674461"],
+        "label": "JVM3_RNU1_3_WT vs JVM3_RNU1_3_AC"
+    },
+    {
+        "control": ["SRR10485750"],
+        "treatment": ["SRR10485752"],
+        "label": "hela_overexpression_1.5ug vs Control"
+    },
+    {
+        "control": ["SRR10485750"],
+        "treatment": ["SRR10485751"],
+        "label": "hela_overexpression_1ug vs Control"
+    }
+]
 
 lines = description_data.strip().split('\n')
 cleaned_lines = [item.strip() for item in lines]
@@ -414,7 +448,7 @@ def raw_data(snap_custom,  acceptor_side, donor_side, slct_acceptor):
     custom_data_raw = process_drug_acceptor_data_raw(temp_acceptor_custom)
     data = custom_data_raw.set_index('Samples')
     raw_data = pd.DataFrame(data)
-    #print(raw_data)
+    
     return raw_data
 
 
@@ -469,6 +503,9 @@ def heatmap(slct_gene, slct_acceptor):
     # case: if id doesnt exist in dict, then keep its SSR value
     new_index = [sample_condition.get(i,i) for i in heatmap_data.index] 
     heatmap_data.index = new_index
+    
+    # sort in alphabetical order
+    heatmap_data = heatmap_data.sort_index()
 
     custom_xtick_labels = [f"{col}\n({annotation_map.get(int(col), 'N/A')})" for col in heatmap_data.columns]
     
@@ -628,65 +665,72 @@ def update_needleplot(selected_gene, needle_max, needle_option):
 
     for acceptor in canonical_acceptors:
         
-        # find needleplot values using the raw data (statistical significance of results)
+        
         samples_raw_data = raw_data(snap_custom, acceptor_side, donor_side, acceptor)
+        #print('Acceptior data is: \n')
+        #print(samples_raw_data)
+        
 
-        #Samples column index is SRR id 
-
-        if isinstance(samples_raw_data, pd.DataFrame):
-            new_index = [sample_condition.get(i,i) for i in samples_raw_data.index] 
-            samples_raw_data.index = new_index
-            print(samples_raw_data)
-
-            # find average for controls and treatments
-            avgs = {}
-            for exp in experiments:
-
-                treatment_rows = samples_raw_data[samples_raw_data.index.str.contains(rf'^{exp}')]
-                if len(treatment_rows) < 1:
-                    continue
-                #print('treatment rows:' + x)
-                #print(treatment_rows)
-
-                control_rows = samples_raw_data[samples_raw_data.index.str.contains(rf'^{experiments[exp]}')]
-                if len(control_rows) < 1:
-                    continue
-                #print('control rows' + experiments[x])
-                #print(control_rows)
-
-                treatment_avg = treatment_rows.mean(axis=0)
-                #print('treatment avg below:')
-                #print(treatment_avg)
-                control_avg = control_rows.mean(axis=0)
-                #print('control avg below:')
-                #print(control_avg)
-
-                avgs[str(exp)] = [treatment_avg, control_avg]
-
-            print(avgs)
-
-            acceptor_mean = samples_raw_data.mean(axis=0)
-        else:
-            # if not a dataframe, means no info, so skip acceptor 
+        # if not a dataframe, means no info, so skip this acceptor 
+        if not isinstance(samples_raw_data, pd.DataFrame):
             continue
+            
+        # find average for controls and treatments for each experiment, and plug into needle function
+        experiment_averages = {}
 
-        # for each sample in an acceptor, get the needle value 
-        # and find the maximum needle value for each acceptor 
-        needle_values = [get_needle_value(arr[0], arr[1]) for arr in avgs.values()]
+        for experiment in experiments:
+            
+            # process the control samples. Samples column index is SRR id 
+            controls = experiment["control"]
+            control_samples = [samples_raw_data[samples_raw_data.index.str.contains(control)] for control in controls]
+            control_samples_df = pd.concat(control_samples)
+
+            # if theres no samples for this experiment 
+            if control_samples_df.empty:
+                continue
+            else:
+                control_avg = control_samples_df.mean(axis=0)
+
+            # process the treatment samples
+            treatments = experiment["treatment"]
+            treatment_samples = [samples_raw_data[samples_raw_data.index.str.contains(treatment)] for treatment in treatments]
+            treatment_samples_df = pd.concat(treatment_samples)
+
+            # if theres no samples for this experiment 
+            if treatment_samples_df.empty:
+                continue
+            else:
+                treatment_avg = treatment_samples_df.mean(axis=0)
+
+            label = experiment["label"]
+            experiment_averages[label] = [treatment_avg, control_avg]
+
+            
+            if label == "Treated_SMA vs Control_FB13":
+                print('gene is: ' + str(selected_gene) + 'acceptor is: ' + str(acceptor) + 'label: ' + label)
+                print('treatment samples: ')
+                print(treatment_avg)
+                print('control sample: ')
+                print(control_avg)
+
+        #print(experiment_averages)
+
+
+        # for each experiment get the needle value. Use the max needle value for each acceptor 
+        needle_values = [get_needle_value(result[0], result[1]) for result in experiment_averages.values()]
+        print('needle values:') 
         print(needle_values)
-        #needle_values = samples_raw_data.apply(lambda row: get_needle_value(acceptor_mean, row), axis=1)
-        highest_needle = max(needle_values) #.max()
+        highest_needle = max(needle_values) 
+
         print('highest needle value is: ' + str(highest_needle))
 
         x.append(str(acceptor))
 
         if needle_option == 'log':
             y.append(math.log(float(highest_needle)))
-            print(math.log(float(highest_needle)))
         
         else:
             y.append(min(highest_needle, needle_max))
-            print(min(highest_needle, needle_max))
 
         coord = str(acceptor) + '-' + str(acceptor + 100)
         domains.append({"name": str(acceptor), "coord": coord})
