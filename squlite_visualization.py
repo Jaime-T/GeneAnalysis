@@ -30,9 +30,15 @@ description_data = """
  SRR15622469 - DMSO control_1
  SRR15622470 - DMSO control_2
  SRR15622463 - DMSO control_3
+ SRR15622464 - Treated with 2 nM branaplam_1
+ SRR15622465 - Treated with 2 nM branaplam_2 
+ SRR15622466 - Treated with 2 nM branaplam_3
  SRR15622468 - Treated with 40 nM branaplam_1
  SRR15622467 - Treated with 40 nM branaplam_2
  SRR15622456 - Treated with 40 nM branaplam_3
+ SRR15622457 - Treated with 50 nM risdiplam_1
+ SRR15622458 - Treated with 50 nM risdiplam_2
+ SRR15622459 - Treated with 50 nM risdiplam_3
  SRR15622461 - Treated with 1000 nM risdiplam_1
  SRR15622460 - Treated with 1000 nM risdiplam_2
  SRR15622462 - Treated with 1000 nM risdiplam_3
@@ -69,6 +75,16 @@ description_data = """
  """
 
 experiments = [
+    {
+        "control": ["SRR15622469", "SRR15622470", "SRR15622463"],
+        "treatment": ["SRR15622464", "SRR15622465", "SRR15622466"],
+        "label": "DMSO vs 2 nM branaplam"
+    },
+    {
+        "control": ["SRR15622469", "SRR15622470", "SRR15622463"],
+        "treatment": ["SRR15622457", "SRR15622458", "SRR15622459"],
+        "label": "DMSO vs 50 nM risdiplam"
+    },
     {
         "control": ["SRR15622469", "SRR15622470", "SRR15622463"],
         "treatment": ["SRR15622468", "SRR15622467", "SRR15622456"],
@@ -413,6 +429,7 @@ def calc_lnlr(r1, r2, alpha = None):
 def calc_LR(alpha_estimates, raw_sample, prior_count=1):
     
     alpha_estimates_sample = raw_sample #.squeeze() 
+
     LR = np.exp(calc_lnlr(alpha = np.full((alpha_estimates.shape[0],), prior_count),
                           r1=alpha_estimates, # alphas calculated using MLE with ratios from GTEx
                           r2=alpha_estimates_sample))# alphas calculated using raw counts+1, to test against the background  
@@ -426,53 +443,60 @@ def get_needle_value(mean, indiv_sample):
 
 # Raw data for each acceptor of a gene
 def raw_data(snap_custom,  acceptor_side, donor_side, slct_acceptor):
-    
     temp_acceptor_custom = snap_custom[snap_custom[acceptor_side] == slct_acceptor] # changed this based on user input 
     
     if temp_acceptor_custom.shape[0] < 2:
         # not enough data
         return {} 
-
-    temp_acceptor_custom_annotation = temp_acceptor_custom[[donor_side,'annotation']]
-    temp_acceptor_custom_annotation.loc[:,'annotation'] = np.where(
-    temp_acceptor_custom_annotation['annotation'] != 'non-canonical',
-    'canonical',  # This will be set if condition is True
-    'non-canonical'  # This will be set if condition is False
-    )
-    
-    if temp_acceptor_custom.strand.tolist()[0] == '+':
-        acceptor_name = temp_acceptor_custom.end.iloc[0]
-    else:
-        acceptor_name = temp_acceptor_custom.start.iloc[0]
     
     custom_data_raw = process_drug_acceptor_data_raw(temp_acceptor_custom)
-    data = custom_data_raw.set_index('Samples')
-    raw_data = pd.DataFrame(data)
-    
+    raw_data = pd.DataFrame(custom_data_raw)
     return raw_data
+
+def filtered_raw_data(raw_data):
+    # Make a df with the proportion numbers
+    numeric_columns = raw_data.columns.drop('Samples')
+    row_sums = raw_data[numeric_columns].sum(axis=1)
+    prop_data = raw_data[numeric_columns].div(row_sums, axis=0)
+    prop_data.insert(0, 'Samples', raw_data['Samples'])
+    
+    ### discard columns where for all samples values are smaller than 1%
+    valid_columns = prop_data.drop('Samples', axis=1).apply(lambda x: (x >= 0.01).any())
+
+    # Filter the raw data to include only the valid columns plus 'Samples'
+    filtered_data = raw_data.loc[:, ['Samples'] + valid_columns[valid_columns].index.tolist()]
+
+    # Drop the 'Samples' column but store it for use as index
+    filtered_data.set_index('Samples', inplace=True)
+
+    # less than 2 valid acceptor sites
+    if filtered_data.shape[1] < 2:
+        return {}
+    return filtered_data 
 
 
 # HeatMap data for gui 
 def heatmap(slct_gene, slct_acceptor):
     # Filter based on user input 
-    container = f"The acceptor and gene chosen by user was: {slct_acceptor}, {slct_gene}"
+    if slct_acceptor is None:
+            container = "Choose an acceptor. Click a point on the needleplot, or select from dropdown options"
+            return {}, {}, container
+    else:
+        container = f"The acceptor and gene chosen by user was: {slct_acceptor}, {slct_gene}"
+    
     snap_custom, canonical_acceptor, acceptor_side, donor_side = get_gene_acceptor_data(slct_gene)
     temp_acceptor_custom = snap_custom[snap_custom[acceptor_side] == slct_acceptor] # changed this based on user input 
     
+    if temp_acceptor_custom.shape[0] < 2:
+        container = f"The acceptor and gene chosen by user was: {slct_acceptor}, {slct_gene}.\n Not enough data for this acceptor"
+        return {}, {}, container
+
     temp_acceptor_custom_annotation = temp_acceptor_custom[[donor_side,'annotation']]
     temp_acceptor_custom_annotation.loc[:,'annotation'] = np.where(
     temp_acceptor_custom_annotation['annotation'] != 'non-canonical',
     'canonical',  # This will be set if condition is True
     'non-canonical'  # This will be set if condition is False
     )
-    
-    if temp_acceptor_custom.shape[0] < 2:
-        #continue
-        if slct_acceptor is None:
-            container = "Choose an acceptor. Click a point on the needleplot, or select from dropdown options"
-        else:
-            container = f"The acceptor and gene chosen by user was: {slct_acceptor}, {slct_gene}.\n Not enough data for this acceptor"
-        return {}, {}, container
     
     if temp_acceptor_custom.strand.tolist()[0] == '+':
         acceptor_name = temp_acceptor_custom.end.iloc[0]
@@ -491,13 +515,18 @@ def heatmap(slct_gene, slct_acceptor):
     valid_columns = prop_data.drop('Samples', axis=1).apply(lambda x: (x >= 0.01).any())
 
     # Filter the DataFrame to include only the valid columns plus 'Samples'
-    prop_data = prop_data.loc[:, ['Samples'] + valid_columns[valid_columns].index.tolist()]    
+    prop_data = prop_data.loc[:, ['Samples'] + valid_columns[valid_columns].index.tolist()]  
     
     # Visualize data as a heatmap
     annotation_map = temp_acceptor_custom_annotation.set_index('start')['annotation'].to_dict()
 
     # Drop the 'Samples' column for the heatmap data but store it for use as y-axis labels
     heatmap_data = prop_data.set_index('Samples')
+
+    # less than 2 valid acceptor sites
+    if heatmap_data.shape[1] < 2:
+        container = container = f"The acceptor and gene chosen by user was: {slct_acceptor}, {slct_gene}.\n Not enough donors for this acceptor"
+        return {}, {}, container
 
     # change sampleid to sample name of condition, using the sample_condition dict 
     # case: if id doesnt exist in dict, then keep its SSR value
@@ -508,7 +537,7 @@ def heatmap(slct_gene, slct_acceptor):
     heatmap_data = heatmap_data.sort_index()
 
     custom_xtick_labels = [f"{col}\n({annotation_map.get(int(col), 'N/A')})" for col in heatmap_data.columns]
-    
+
     # Plotly Express heatmap
     fig = px.imshow(heatmap_data, 
                     labels=dict(x="Acceptor sites", y="Sample ID", color="Proportion"),
@@ -517,12 +546,18 @@ def heatmap(slct_gene, slct_acceptor):
                     text_auto=".2f", 
                     aspect="auto",
                     color_continuous_scale='Viridis')
+    fig.update_layout(
+        height=800,
+        yaxis=dict(
+            automargin=True,
+            title='Sample ID',  
+            tickmode='linear'  # Ensures ticks are shown at regular intervals
+        ),
+        margin=dict(l=60, r=20, t=40, b=40)  
+    )
                     
     return heatmap_data, fig, container
 
-
-## Start App
-app = Dash(__name__, external_stylesheets=['https://codepen.io/chriddyp/pen/bWLwgP.css'])
 
 # Generate dropdown options dynamically
 def get_all_ensembl_genes():
@@ -566,79 +601,125 @@ needle_sample_data = {
     ]  
 }
 
+## Start App
+app = Dash(__name__, suppress_callback_exceptions=True, external_stylesheets=['https://codepen.io/chriddyp/pen/bWLwgP.css'])
+
 # App layout
 app.layout = html.Div([
     html.H1("Proportion of Counts in an Acceptor", style={'text-align': 'center'}),
 
-    html.P("Select Gene:"),
+    # Gene View or Experiment View, choose a tab 
+    dcc.Tabs(id='gene_or_exper_tab', value='gene_tab', children=[
+        dcc.Tab(label='Gene View', value='gene_tab'),
+        dcc.Tab(label='Experiment View', value='exper_tab'),
+    ]),
+    html.Div(id='gene_or_exper_tab_content'),
 
-    dcc.Dropdown(id="slct_gene",
-                 options=gene_options,
-                 multi=False,
-                 value='SMN2', # default value
-                 style={'width': "40%", 'display':'inline-block'}
-                 ),
 
-    html.P("Show or hide range slider:"),
-
-    dcc.Dropdown(
-        id='needleplot-rangeslider',
-        options=[
-            {'label': 'Show', 'value': 1},
-            {'label': 'Hide', 'value': 0}
-        ],
-        clearable=False,
-        multi=False,
-        value=1,
-        style={'width': "40%"}
-    ),
-
-    html.H1("NeedlePlot"),
-    
-    html.P("Maximum needle value:"),
-    dcc.Dropdown(
-        id='needleplot_max',
-        options=[{"label": num, "value": num} for num in range(100,1100,100)],
-        value=200,
-        multi=False,
-        style={'width': "40%"}
-    ),
-
-    html.P("Needle value options:"),
-    dcc.Dropdown(
-        id='needleplot_option',
-        options=[{"label": "Actual", "value": "actual"}, {"label": "Log", "value": "log"}],
-        value="actual",
-        multi=False,
-        style={'width': "40%"}
-    ),
-
-    html.P("Click on an intron of interest", style={'color': 'blue', 'fontSize': 15}),
-
-    dashbio.NeedlePlot(
-        id='gene-needleplot',
-        mutationData=needle_sample_data,
-        xlabel='Gene',
-        ylabel='Score',
-        width=1000,
-        domainStyle={
-        'displayMinorDomains': True}
-    ),
-
-    dcc.Dropdown(id="slct_acceptor",
-                 options=[],
-                 multi=False,
-                 value='70067293', # default 
-                 style={'width': "40%"}
-                 ),
-    
-    html.Div(id='output_container', children=[], style={'color': 'blue'}),
-
-    # Heat map
-    html.H1("Heat Map"),
-    dcc.Graph(id='my_acceptor_map', figure={})
 
 ])
+
+@app.callback(
+    Output(component_id='gene_or_exper_tab_content', component_property='children'),
+    Input(component_id='gene_or_exper_tab', component_property='value')
+)
+
+def render_content(tab):
+    if tab == 'gene_tab': # Gene View 
+        return html.Div([
+            html.H3('Gene View!'),
+            html.P("Select Gene:"),
+
+            dcc.Dropdown(id="slct_gene",
+                        options=gene_options,
+                        multi=False,
+                        value='H3-3A', # default value
+                        style={'width': "40%", 'display':'inline-block'}
+                        ),
+
+            html.P("Show or hide range slider:"),
+
+            dcc.Dropdown(
+                id='needleplot-rangeslider',
+                options=[
+                    {'label': 'Show', 'value': 1},
+                    {'label': 'Hide', 'value': 0}
+                ],
+                clearable=False,
+                multi=False,
+                value=1,
+                style={'width': "40%"}
+            ),
+
+            html.H1("NeedlePlot"),
+            
+            html.P("Maximum needle value:"),
+            dcc.Dropdown(
+                id='needleplot_max',
+                options=[{"label": num, "value": num} for num in range(100,1100,100)],
+                value=200,
+                multi=False,
+                style={'width': "40%"}
+            ),
+
+            html.P("Needle value options:"),
+            dcc.Dropdown(
+                id='needleplot_option',
+                options=[{"label": "Actual", "value": "actual"}, {"label": "Log", "value": "log"}],
+                value="actual",
+                multi=False,
+                style={'width': "40%"}
+            ),
+
+            # Centered NeedlePlot
+            html.Div(
+                style={
+                    'display': 'flex',
+                    'justify-content': 'center',
+                    'align-items': 'center',
+                    'margin': '20px',
+                    'width': '90%'
+                },
+                children=[
+                    dashbio.NeedlePlot(
+                        id='gene-needleplot',
+                        mutationData=needle_sample_data,
+                        xlabel='Gene',
+                        ylabel='Score',
+                        width=1200,
+                        domainStyle={'displayMinorDomains': True}
+                    )
+                ]
+            ),
+            html.P("Click on an intron of interest", style={'color': 'blue', 'fontSize': 15}),
+
+            dcc.Dropdown(id="slct_acceptor",
+                        options=[],
+                        multi=False,
+                        value='70067293', # default 
+                        style={'width': "40%"}
+                        ),
+            
+            html.Div(id='output_container', children=[], style={'color': 'blue'}),
+
+            # Heat map
+            html.H1("Heat Map"),
+            dcc.Graph(id='my_acceptor_map', figure={})
+
+        ])
+    
+    elif tab == 'exper_tab': # Experiment view
+        return html.Div([
+            html.H3('Experiment Tab'),
+            html.P('Still being developed! But.. you can select an experiment of interest :)'),
+
+            dcc.Dropdown(id="slct_exper",
+                         options=[exp["label"] for exp in experiments],
+                         multi=False,
+                         value='DMSO vs 40 nM branaplam',
+                         style={'width': "40%"}
+                         )
+        ])
 
 
 @app.callback(
@@ -663,26 +744,33 @@ def update_needleplot(selected_gene, needle_max, needle_option):
     x = []
     y = []
 
+    # find max needle value for each acceptor
+    acceptor_needles = {}
+
     for acceptor in canonical_acceptors:
         
-        
         samples_raw_data = raw_data(snap_custom, acceptor_side, donor_side, acceptor)
-        #print('Acceptior data is: \n')
-        #print(samples_raw_data)
-        
 
         # if not a dataframe, means no info, so skip this acceptor 
         if not isinstance(samples_raw_data, pd.DataFrame):
             continue
-            
-        # find average for controls and treatments for each experiment, and plug into needle function
-        experiment_averages = {}
+
+        valid_raw_data = filtered_raw_data(samples_raw_data)
+        
+        # if not a dataframe, means no info, so skip this acceptor 
+        if not isinstance(valid_raw_data, pd.DataFrame):
+            continue
+
+        if valid_raw_data.empty:
+            continue
+        
+        acceptor_needles[str(acceptor)] = -math.inf
 
         for experiment in experiments:
             
             # process the control samples. Samples column index is SRR id 
             controls = experiment["control"]
-            control_samples = [samples_raw_data[samples_raw_data.index.str.contains(control)] for control in controls]
+            control_samples = [valid_raw_data[valid_raw_data.index.str.contains(control)] for control in controls]
             control_samples_df = pd.concat(control_samples)
 
             # if theres no samples for this experiment 
@@ -693,50 +781,50 @@ def update_needleplot(selected_gene, needle_max, needle_option):
 
             # process the treatment samples
             treatments = experiment["treatment"]
-            treatment_samples = [samples_raw_data[samples_raw_data.index.str.contains(treatment)] for treatment in treatments]
+            treatment_samples = [valid_raw_data[valid_raw_data.index.str.contains(treatment)] for treatment in treatments]
             treatment_samples_df = pd.concat(treatment_samples)
 
             # if theres no samples for this experiment 
             if treatment_samples_df.empty:
                 continue
-            else:
-                treatment_avg = treatment_samples_df.mean(axis=0)
+            
+            # Calculate all needles at once
+            needles = treatment_samples_df.apply(lambda row: get_needle_value(control_avg, row), axis=1)
+            print('all needles:', needles)
+
+            # Get the maximum needle value
+            max_needle = needles.max()
+
+            # Update the acceptor_needles dictionary
+            acceptor_needles[str(acceptor)] = max(max_needle, acceptor_needles[str(acceptor)])
+            print('new max is:', acceptor_needles[str(acceptor)] )
 
             label = experiment["label"]
-            experiment_averages[label] = [treatment_avg, control_avg]
-
-            
-            if label == "Treated_SMA vs Control_FB13":
+            if label == 'Treated_SMA vs Control_FB13' and acceptor == 226071350:
                 print('gene is: ' + str(selected_gene) + 'acceptor is: ' + str(acceptor) + 'label: ' + label)
                 print('treatment samples: ')
-                print(treatment_avg)
+                print(treatment_samples_df)
                 print('control sample: ')
-                print(control_avg)
+                print(control_samples_df)
+                print('needle values would be... ', needles)
 
-        #print(experiment_averages)
-
-
-        # for each experiment get the needle value. Use the max needle value for each acceptor 
-        needle_values = [get_needle_value(result[0], result[1]) for result in experiment_averages.values()]
-        print('needle values:') 
-        print(needle_values)
-        highest_needle = max(needle_values) 
-
-        print('highest needle value is: ' + str(highest_needle))
-
-        x.append(str(acceptor))
-
-        if needle_option == 'log':
-            y.append(math.log(float(highest_needle)))
-        
-        else:
-            y.append(min(highest_needle, needle_max))
+                
 
         coord = str(acceptor) + '-' + str(acceptor + 100)
         domains.append({"name": str(acceptor), "coord": coord})
+        
 
-    plot_data = {"x": x, 
-                "y": y, 
+    if needle_option == 'log':
+        acceptor_needles = {key: math.log(value) for key, value in acceptor_needles.items()}
+    
+    else:
+        acceptor_needles = {key: min(needle_max,value) for key, value in acceptor_needles.items()}
+    
+    print(acceptor_needles)
+
+
+    plot_data = {"x": list(acceptor_needles.keys()), 
+                "y": list(acceptor_needles.values()), 
                 "domains": domains}
     return plot_data
 
@@ -794,6 +882,7 @@ def update_acceptor_options(selected_gene):
 def update_graph(slct_acceptor, slct_gene):
     print(f"Acceptor: {slct_acceptor}, Gene: {slct_gene}")
     heatmap_data, fig, container = heatmap(slct_gene, slct_acceptor)
+    
     return container, fig
 
 
