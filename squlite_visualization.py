@@ -25,6 +25,7 @@ import dash_bio as dashbio
 from scipy import special
 import json
 import math
+from sklearn.cluster import KMeans
 
 description_data = """
  SRR15622469 - DMSO control_1
@@ -704,7 +705,8 @@ def render_content(tab):
 
             # Heat map
             html.H1("Heat Map"),
-            dcc.Graph(id='my_acceptor_map', figure={})
+            dcc.Graph(id='my_acceptor_map', figure={}),
+
 
         ])
     
@@ -884,7 +886,6 @@ def update_graph(slct_acceptor, slct_gene):
     heatmap_data, fig, container = heatmap(slct_gene, slct_acceptor)
     
     return container, fig
-
 
 if __name__ == '__main__':
     app.run(debug=True) 
