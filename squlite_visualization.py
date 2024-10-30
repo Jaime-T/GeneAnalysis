@@ -25,6 +25,7 @@ import dash_bio as dashbio
 from scipy import special
 import json
 import math
+from sklearn.cluster import KMeans
 
 description_data = """
  SRR15622469 - DMSO control_1
@@ -704,7 +705,12 @@ def render_content(tab):
 
             # Heat map
             html.H1("Heat Map"),
-            dcc.Graph(id='my_acceptor_map', figure={})
+            dcc.Graph(id='my_acceptor_map', figure={}),
+
+            # kmeans clustering 
+            html.H1("Clustering Map") #,
+            #dcc.Graph(id='cluster_graph', figure={})
+
 
         ])
     
@@ -885,6 +891,20 @@ def update_graph(slct_acceptor, slct_gene):
     
     return container, fig
 
+# Cluster graph
+''' 
+@app.callback(
+    [Output(component_id='cluster_graph', component_property='figure')],
+    [Input(component_id='slct_acceptor', component_property='value'),
+     Input(component_id='slct_gene', component_property='value')]
+)
+
+def update_cluster(slct_acceptor, slct_gene):
+    kmeans = KMeans(n_clusters=2)
+    data = filtered_raw_data
+    kmeans.fit(data)
+'''
+#cluster_graph
 
 if __name__ == '__main__':
     app.run(debug=True) 
