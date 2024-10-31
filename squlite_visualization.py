@@ -26,6 +26,7 @@ from scipy import special
 import json
 import math
 from sklearn.cluster import KMeans
+from sklearn.decomposition import PCA
 
 description_data = """
  SRR15622469 - DMSO control_1
@@ -74,6 +75,91 @@ description_data = """
  SRR10485748 - U1AMO_12.5pmol
  SRR10485747 - cAMO_for_U1AMO
  """
+
+projects = [
+    {
+        "id": "SRP230398",
+        "samples": [
+            "SRR10485747",
+            "SRR10485748",
+            "SRR10485749",
+            "SRR10485750",
+            "SRR10485751",
+            "SRR10485752",
+        ],
+    },
+    {
+        "id": "SRP334251",
+        "samples": [
+            "SRR15622456",
+            "SRR15622457",
+            "SRR15622458",
+            "SRR15622459",
+            "SRR15622460",
+            "SRR15622461",
+            "SRR15622462",
+            "SRR15622463",
+            "SRR15622464",
+            "SRR15622465",
+            "SRR15622466",
+            "SRR15622467",
+            "SRR15622468",
+            "SRR15622469",
+            "SRR15622470",
+        ],
+    },
+    {
+        "id": "SRP346802",
+        "samples": [
+            "SRR16976776",
+            "SRR16976777",
+        ],
+    },
+    {
+        "id": "SRP097892",
+        "samples": [
+            "SRR5206782",
+            "SRR5206783",
+            "SRR5206784",
+            "SRR5206786",
+            "SRR5206787",
+            "SRR5206788",
+            "SRR5206789",
+        ],
+    },
+    {
+        "id": "SRP184220",
+        "samples": [
+            "SRR8539668",
+        ],
+    },
+    {
+        "id": "SRP187872",
+        "samples": [
+            "SRR8697000",
+            "SRR8697001",
+            "SRR8697002",
+            "SRR8697003",
+        ],
+    },
+    {
+        "id": "SRP214439",
+        "samples": [
+            "SRR9674461",
+            "SRR9674463",
+            "SRR9674464",
+            "SRR9674465",
+            "SRR9674466",
+            "SRR9674467",
+            "SRR9674468",
+            "SRR9674469",
+            "SRR9674470",
+            "SRR9674471",
+            "SRR9674472",
+        ],
+    },
+]
+
 
 experiments = [
     {
@@ -442,6 +528,62 @@ def get_needle_value(mean, indiv_sample):
     needle_value = 1/bayes_factor
     return needle_value
 
+def get_raw_expression_data(selected_gene, selected_acceptor):
+    conn = sqlite3.connect('/Users/jaimetaitz/cci_internship/GeneAnalysis/jc_custom_STARjunc.sqlite')
+    cur = conn.cursor()
+    print('Selected acceptor: ', selected_acceptor)
+    print('Selected gene: ', selected_gene)
+     # Retrieve gene info and intron details
+    geneinfo = get_ensembl_gene_info(selected_gene)
+    enst = re.sub('[.].*$', '', geneinfo['canonical_transcript'])
+    goi_introns = get_enst_intron_df(enst)
+    
+    # Get transcript details
+    trx_stat, seq = ensembl_trxseq(enst)
+    strand = {-1: '-', 1: '+'}[geneinfo['strand']]
+    
+    # Determine region and strand based on gene strand
+    chromosome = trx_stat['chr']
+    start_pos = trx_stat['start']
+    end_pos = trx_stat['end']
+    
+    # Select appropriate acceptor side
+    acceptor_side = 'end' if geneinfo['strand'] == 1 else 'start'
+    
+    # SQL query with filtering for acceptor side and acceptor value
+    query = f"""
+    SELECT snaptron_id, chrom AS 'chromosome', start, end,
+           length, strand, annotated, donor AS 'left_motif', 
+           acceptor AS 'right_motif', samples, samples_count, 
+           coverage_sum, coverage_avg, coverage_median, 
+           source_dataset_id
+    FROM intron 
+    WHERE chrom = '{chromosome}' 
+      AND strand = '{strand}'
+      AND start <= {end_pos} 
+      AND end >= {start_pos}
+      AND {acceptor_side} = {selected_acceptor};
+    """
+    
+    # Execute the query
+    snap_custom = pd.read_sql_query(query, conn)
+    conn.close()
+
+     # only consider introns within the limit of the canonical transcript
+    snap_custom = snap_custom.loc[(snap_custom['start'] >= goi_introns['start'].min()) & (snap_custom['end'] <= goi_introns['end'].max())]
+
+    snap_custom = snap_custom.join(goi_introns[['start','end','transcript_name', 'annotation']].set_index(['start','end']), how='left', on=['start','end'])
+    snap_custom = snap_custom.fillna('non-canonical')
+
+    # sort snap0
+    snap_custom = snap_custom.sort_values('start').reset_index(drop=True)
+    snap_custom['genesymbol'] = geneinfo['display_name']
+    snap_custom['ensembl'] = geneinfo['id']
+    
+    data_raw = process_drug_acceptor_data_raw(snap_custom)
+    data_raw_df = pd.DataFrame(data_raw)
+    return data_raw_df
+
 # Raw data for each acceptor of a gene
 def raw_data(snap_custom,  acceptor_side, donor_side, slct_acceptor):
     temp_acceptor_custom = snap_custom[snap_custom[acceptor_side] == slct_acceptor] # changed this based on user input 
@@ -634,7 +776,7 @@ def render_content(tab):
             dcc.Dropdown(id="slct_gene",
                         options=gene_options,
                         multi=False,
-                        value='H3-3A', # default value
+                        value='SMN2', # default value
                         style={'width': "40%", 'display':'inline-block'}
                         ),
 
@@ -707,6 +849,11 @@ def render_content(tab):
             html.H1("Heat Map"),
             dcc.Graph(id='my_acceptor_map', figure={}),
 
+            # KMeans clustering 
+            html.H1("Clustering Map"),
+            html.Div(id='cluster_container', children=[], style={'color': 'black'}),
+            dcc.Graph(id='cluster_graph')
+            
 
         ])
     
@@ -792,16 +939,17 @@ def update_needleplot(selected_gene, needle_max, needle_option):
             
             # Calculate all needles at once
             needles = treatment_samples_df.apply(lambda row: get_needle_value(control_avg, row), axis=1)
-            print('all needles:', needles)
+            #print('all needles:', needles)
 
             # Get the maximum needle value
             max_needle = needles.max()
 
             # Update the acceptor_needles dictionary
             acceptor_needles[str(acceptor)] = max(max_needle, acceptor_needles[str(acceptor)])
-            print('new max is:', acceptor_needles[str(acceptor)] )
+            #print('new max is:', acceptor_needles[str(acceptor)] )
 
             label = experiment["label"]
+            ''' 
             if label == 'Treated_SMA vs Control_FB13' and acceptor == 226071350:
                 print('gene is: ' + str(selected_gene) + 'acceptor is: ' + str(acceptor) + 'label: ' + label)
                 print('treatment samples: ')
@@ -810,7 +958,7 @@ def update_needleplot(selected_gene, needle_max, needle_option):
                 print(control_samples_df)
                 print('needle values would be... ', needles)
 
-                
+            '''
 
         coord = str(acceptor) + '-' + str(acceptor + 100)
         domains.append({"name": str(acceptor), "coord": coord})
@@ -822,7 +970,7 @@ def update_needleplot(selected_gene, needle_max, needle_option):
     else:
         acceptor_needles = {key: min(needle_max,value) for key, value in acceptor_needles.items()}
     
-    print(acceptor_needles)
+    print('Acceptor needles ',acceptor_needles)
 
 
     plot_data = {"x": list(acceptor_needles.keys()), 
@@ -884,8 +1032,123 @@ def update_acceptor_options(selected_gene):
 def update_graph(slct_acceptor, slct_gene):
     print(f"Acceptor: {slct_acceptor}, Gene: {slct_gene}")
     heatmap_data, fig, container = heatmap(slct_gene, slct_acceptor)
-    
     return container, fig
+
+# Cluster graph
+
+@app.callback(
+    [Output(component_id='cluster_graph', component_property='figure'),
+     Output(component_id='cluster_container', component_property='children')],
+    [Input(component_id='slct_acceptor', component_property='value'),
+     Input(component_id='slct_gene', component_property='value')]
+)
+
+def update_cluster(slct_acceptor, slct_gene):
+    if slct_acceptor is None:
+        return {}, 'Select an acceptor'
+
+    raw_data_df = get_raw_expression_data(slct_gene, slct_acceptor)
+    #numeric_data = raw_data_df.drop(columns='Samples')
+
+    # Calculate valid columns where the sum is >= 5, excluding the 'Samples' column
+    valid_columns = raw_data_df.drop('Samples', axis=1).apply(lambda x: x.sum() >= 5)
+
+    # Filter the DataFrame to include only the valid columns plus 'Samples'
+    filtered_data = raw_data_df.loc[:, ['Samples'] + valid_columns[valid_columns].index.tolist()]
+
+    # Display the result
+    print(filtered_data)
+    #filtered_data = raw_data_df.loc[:, raw_data_df.sum(axis=0) >= 5 | (raw_data_df.columns == 'Sample')]
+
+    print('Raw data:\n', raw_data_df)
+    print('filtered data: ', filtered_data)
+
+    project_euc_distance = {}
+    
+    for project in projects:
+        print('project id is:', project["id"])
+        print('samples are: ', project["samples"])
+        samples = project["samples"]
+        project_data = filtered_data[filtered_data["Samples"].isin(samples)]
+
+        if project_data.empty:
+            print('no matches')
+            continue
+        else:
+            print(project_data)
+
+        numeric_data = project_data.drop(columns='Samples')
+        print('numeric data:', numeric_data)
+
+        if numeric_data.shape[0] < 2:
+            print('not enough samples, only: ', numeric_data.shape[0])
+            continue 
+        kmeans = KMeans(n_clusters=2)
+        labels = kmeans.fit_predict(numeric_data)
+        cluster_centers = kmeans.cluster_centers_
+
+        print('Labels: ', labels)
+        print("Cluster Centers:", cluster_centers)
+        euclidean_distance = np.linalg.norm(cluster_centers[0] - cluster_centers[1])
+        print("Euclidean distance: ", euclidean_distance)
+        project_euc_distance[project["id"]] = euclidean_distance
+        print('\n')
+
+    print('project euc distances: ', project_euc_distance)
+
+        
+
+    # check if there are enough dimensions for pca
+    if filtered_data.shape[1] >= 2:
+        array_for_kmeans = filtered_data.to_numpy()
+        #print('Data array:\n', array_for_kmeans)
+        pca = PCA(n_components=2)
+        pca_results = pca.fit_transform(array_for_kmeans)
+
+        # Apply kmeans
+        kmeans = KMeans(n_clusters=2)
+        labels = kmeans.fit_predict(pca_results)
+
+        # Display cluster centers
+        cluster_centers = kmeans.cluster_centers_
+        print("Cluster Centers:", cluster_centers)
+
+        # Calculate Euclidean distance between the two cluster centers
+        if len(cluster_centers) == 2:  # Ensure there are exactly 2 clusters
+            euclidean_distance = np.linalg.norm(cluster_centers[0] - cluster_centers[1])
+            container = "Euclidean distance between clusters: ", euclidean_distance
+            print("Euclidean distance between clusters: ", euclidean_distance)
+        else:
+            euclidean_distance = None
+            container = "Unexpected number of clusters:", len(cluster_centers)
+            print("Unexpected number of clusters:", len(cluster_centers))
+
+    else:
+        return {}, 'Not enough dimensions for clustering'
+    
+
+    # Prepare DataFrame for Plotly
+    df = pd.DataFrame(pca_results, columns=['PC1', 'PC2'])
+    df['Cluster'] = labels  # Add cluster labels as a column
+
+    # Create a 2D scatter plot
+    fig = px.scatter(
+        df, x='PC1', y='PC2', color='Cluster', 
+        title="PCA Clustering Visualization", 
+        labels={'Cluster': 'Cluster'}, color_continuous_scale='Bluered_r'
+    )
+
+    return fig, container
+ 
+    #plotting the results:
+    
+    #for i in u_labels:
+     #   plt.scatter(array_for_kmeans[labels == i , 0] , array_for_kmeans[labels == i , 1] , labels = i)
+    #plt.legend()
+    #plt.show()
+
+
+
 
 if __name__ == '__main__':
     app.run(debug=True) 
