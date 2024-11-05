@@ -25,7 +25,6 @@ import dash_bio as dashbio
 from scipy import special
 import json
 import math
-from sklearn.cluster import KMeans
 from sklearn.decomposition import PCA
 
 description_data = """
@@ -492,9 +491,12 @@ def get_gene_acceptor_data(selected_gene = 'SMN2'):
 ### HTT k=47
 ### SMN2 k=7
 
-## Needle Values 
-def calc_lnlr(r1, r2, alpha = None):
+# Dirichlet and needle functions
 
+def calc_lnlr(r1, r2, alpha = None):
+    '''
+    (B(alpha+r1+r2)*B(alpha))/(B(alpha+r1)*B(alpha+r2))
+    '''
     if(r1.shape[0] != r2.shape[0]):
         raise Exception("Different K's implied by r1 and r2.")
         
@@ -515,18 +517,90 @@ def calc_lnlr(r1, r2, alpha = None):
 
 def calc_LR(alpha_estimates, raw_sample, prior_count=1):
     
-    alpha_estimates_sample = raw_sample #.squeeze() 
-
+    alpha_estimates_sample = raw_sample.squeeze() 
+    
     LR = np.exp(calc_lnlr(alpha = np.full((alpha_estimates.shape[0],), prior_count),
                           r1=alpha_estimates, # alphas calculated using MLE with ratios from GTEx
                           r2=alpha_estimates_sample))# alphas calculated using raw counts+1, to test against the background  
     return LR
 
 
+# Generalised (able to handle > 2 samples at a time) 
+def calc_lnlr_generalized(r_list, alpha=None):
+    '''
+    Calculates the log likelihood ratio for M Dirichlet distributions.
+
+    Parameters:
+    - r_list: list or array of N-dimensional count vectors, where each vector represents counts for a Dirichlet distribution.
+    - alpha: optional prior parameters, default is a vector of ones.
+
+    Returns:
+    - lnlr: log likelihood ratio for the hypothesis that the distributions come from the same Dirichlet.
+    '''
+    # Number of distributions
+    M = len(r_list)
+    
+    # Check if all r's have the same dimensionality
+    K = r_list[0].shape[0]
+    for r in r_list:
+        if r.shape[0] != K:
+            raise Exception("All count vectors in r_list must have the same dimension.")
+    
+    # Initialize alpha if not provided
+    if alpha is None:
+        alpha = np.ones(K)
+    elif alpha.shape[0] != K:
+        raise Exception("alpha must have the same dimension as the count vectors in r_list.")
+    
+    # Sum of all counts vectors in r_list
+    r_sum = np.sum(r_list, axis=0)
+    
+    # Calculate the log likelihood ratio
+    # term1: ln(B(alpha + sum(r_i)))
+    term1 = np.sum(special.loggamma(alpha + r_sum)) - special.loggamma(np.sum(alpha + r_sum))
+    
+    # term2: (M - 1) * ln(B(alpha))
+    term2 = (M - 1) * (np.sum(special.loggamma(alpha)) - special.loggamma(np.sum(alpha)))  
+    
+    # term3: sum of ln(B(alpha + r_i)) for each r in r_list
+    term3 = sum(np.sum(special.loggamma(alpha + r)) - special.loggamma(np.sum(alpha + r)) for r in r_list)
+    
+    # Combine terms to get log likelihood ratio
+    lnlr = term1 + term2 - term3
+    
+    return lnlr
+
+
+def calc_LR_general(r_list, prior_count=1):
+        
+    LR = np.exp(calc_lnlr_generalized(r_list,
+                                      alpha = np.full((r_list[0].shape[0],), prior_count)))# alphas calculated using raw counts+1, to test against the background  
+    return LR
+
+calc_LR(np.array([1,5,2]),np.array([1,3,10]))
+
+calc_LR_general([np.array([1,5,2]),np.array([1,3,10])])
+
+
+calc_LR_general([np.array([1,2,2]),
+                 np.array([1,5,20]),
+                 np.array([1,3,20]),
+                 np.array([1,3,20])
+                 ])
+
+
+
+
 def get_needle_value(mean, indiv_sample):
     bayes_factor = calc_LR(mean,indiv_sample,7)
     needle_value = 1/bayes_factor
     return needle_value
+
+def get_generalised_needle_value(samples):
+    bayes_factor = calc_LR_general(samples)
+    needle_value = 1/bayes_factor
+    return needle_value
+
 
 def get_raw_expression_data(selected_gene, selected_acceptor):
     conn = sqlite3.connect('/Users/jaimetaitz/cci_internship/GeneAnalysis/jc_custom_STARjunc.sqlite')
@@ -590,7 +664,7 @@ def raw_data(snap_custom,  acceptor_side, donor_side, slct_acceptor):
     
     if temp_acceptor_custom.shape[0] < 2:
         # not enough data
-        return {} 
+        return None
     
     custom_data_raw = process_drug_acceptor_data_raw(temp_acceptor_custom)
     raw_data = pd.DataFrame(custom_data_raw)
@@ -614,7 +688,7 @@ def filtered_raw_data(raw_data):
 
     # less than 2 valid acceptor sites
     if filtered_data.shape[1] < 2:
-        return {}
+        return None
     return filtered_data 
 
 
@@ -849,11 +923,26 @@ def render_content(tab):
             html.H1("Heat Map"),
             dcc.Graph(id='my_acceptor_map', figure={}),
 
-            # KMeans clustering 
-            html.H1("Clustering Map"),
-            html.Div(id='cluster_container', children=[], style={'color': 'black'}),
-            dcc.Graph(id='cluster_graph')
-            
+            # Centered NeedlePlot
+            html.Div(
+                style={
+                    'display': 'flex',
+                    'justify-content': 'center',
+                    'align-items': 'center',
+                    'margin': '20px',
+                    'width': '90%'
+                },
+                children=[
+                    dashbio.NeedlePlot(
+                        id='project-needleplot',
+                        mutationData=needle_sample_data,
+                        xlabel='Project',
+                        ylabel='Score',
+                        width=1200,
+                        domainStyle={'displayMinorDomains': True}
+                    )
+                ]
+            )
 
         ])
     
@@ -890,29 +979,25 @@ def update_needleplot(selected_gene, needle_max, needle_option):
         return needle_sample_data
     
     domains = []
-    x = []
-    y = []
 
     # find max needle value for each acceptor
     acceptor_needles = {}
+    project_needles = {}
+
 
     for acceptor in canonical_acceptors:
         
         samples_raw_data = raw_data(snap_custom, acceptor_side, donor_side, acceptor)
 
-        # if not a dataframe, means no info, so skip this acceptor 
-        if not isinstance(samples_raw_data, pd.DataFrame):
+        # Checking validity
+        if samples_raw_data is None or samples_raw_data.empty:
             continue
 
         valid_raw_data = filtered_raw_data(samples_raw_data)
         
-        # if not a dataframe, means no info, so skip this acceptor 
-        if not isinstance(valid_raw_data, pd.DataFrame):
+        if valid_raw_data is None or valid_raw_data.empty:
             continue
-
-        if valid_raw_data.empty:
-            continue
-        
+       
         acceptor_needles[str(acceptor)] = -math.inf
 
         for experiment in experiments:
@@ -971,7 +1056,7 @@ def update_needleplot(selected_gene, needle_max, needle_option):
         acceptor_needles = {key: min(needle_max,value) for key, value in acceptor_needles.items()}
     
     print('Acceptor needles ',acceptor_needles)
-
+    print('project needles: ', project_needles)
 
     plot_data = {"x": list(acceptor_needles.keys()), 
                 "y": list(acceptor_needles.values()), 
@@ -1034,120 +1119,70 @@ def update_graph(slct_acceptor, slct_gene):
     heatmap_data, fig, container = heatmap(slct_gene, slct_acceptor)
     return container, fig
 
-# Cluster graph
 
+# project needleplot 
 @app.callback(
-    [Output(component_id='cluster_graph', component_property='figure'),
-     Output(component_id='cluster_container', component_property='children')],
-    [Input(component_id='slct_acceptor', component_property='value'),
-     Input(component_id='slct_gene', component_property='value')]
-)
+    Output(component_id='project-needleplot', component_property='mutationData'),
+    Input(component_id='slct_gene', component_property='value'))
 
-def update_cluster(slct_acceptor, slct_gene):
-    if slct_acceptor is None:
-        return {}, 'Select an acceptor'
+def update_proj_needleplot(selected_gene):
+    snap_custom, canonical_acceptors, acceptor_side, donor_side = get_gene_acceptor_data(selected_gene)
+    if len(canonical_acceptors) == 0:
+        return needle_sample_data
 
-    raw_data_df = get_raw_expression_data(slct_gene, slct_acceptor)
-    #numeric_data = raw_data_df.drop(columns='Samples')
 
-    # Calculate valid columns where the sum is >= 5, excluding the 'Samples' column
-    valid_columns = raw_data_df.drop('Samples', axis=1).apply(lambda x: x.sum() >= 5)
+    # find max needle value for each project
+    project_needles = {}
 
-    # Filter the DataFrame to include only the valid columns plus 'Samples'
-    filtered_data = raw_data_df.loc[:, ['Samples'] + valid_columns[valid_columns].index.tolist()]
-
-    # Display the result
-    print(filtered_data)
-    #filtered_data = raw_data_df.loc[:, raw_data_df.sum(axis=0) >= 5 | (raw_data_df.columns == 'Sample')]
-
-    print('Raw data:\n', raw_data_df)
-    print('filtered data: ', filtered_data)
-
-    project_euc_distance = {}
-    
-    for project in projects:
-        print('project id is:', project["id"])
-        print('samples are: ', project["samples"])
-        samples = project["samples"]
-        project_data = filtered_data[filtered_data["Samples"].isin(samples)]
-
-        if project_data.empty:
-            print('no matches')
-            continue
-        else:
-            print(project_data)
-
-        numeric_data = project_data.drop(columns='Samples')
-        print('numeric data:', numeric_data)
-
-        if numeric_data.shape[0] < 2:
-            print('not enough samples, only: ', numeric_data.shape[0])
-            continue 
-        kmeans = KMeans(n_clusters=2)
-        labels = kmeans.fit_predict(numeric_data)
-        cluster_centers = kmeans.cluster_centers_
-
-        print('Labels: ', labels)
-        print("Cluster Centers:", cluster_centers)
-        euclidean_distance = np.linalg.norm(cluster_centers[0] - cluster_centers[1])
-        print("Euclidean distance: ", euclidean_distance)
-        project_euc_distance[project["id"]] = euclidean_distance
-        print('\n')
-
-    print('project euc distances: ', project_euc_distance)
-
+    for acceptor in canonical_acceptors:
         
+        samples_raw_data = raw_data(snap_custom, acceptor_side, donor_side, acceptor)
 
-    # check if there are enough dimensions for pca
-    if filtered_data.shape[1] >= 2:
-        array_for_kmeans = filtered_data.to_numpy()
-        #print('Data array:\n', array_for_kmeans)
-        pca = PCA(n_components=2)
-        pca_results = pca.fit_transform(array_for_kmeans)
+        # Checking validity
+        if samples_raw_data is None or samples_raw_data.empty:
+            continue
 
-        # Apply kmeans
-        kmeans = KMeans(n_clusters=2)
-        labels = kmeans.fit_predict(pca_results)
+        valid_raw_data = filtered_raw_data(samples_raw_data)
+        
+        if valid_raw_data is None or valid_raw_data.empty:
+            continue
+        
+        
+        for project in projects:
+            id = str(project["id"])
 
-        # Display cluster centers
-        cluster_centers = kmeans.cluster_centers_
-        print("Cluster Centers:", cluster_centers)
+            print('\n')
+            sample_ids = project["samples"]
 
-        # Calculate Euclidean distance between the two cluster centers
-        if len(cluster_centers) == 2:  # Ensure there are exactly 2 clusters
-            euclidean_distance = np.linalg.norm(cluster_centers[0] - cluster_centers[1])
-            container = "Euclidean distance between clusters: ", euclidean_distance
-            print("Euclidean distance between clusters: ", euclidean_distance)
-        else:
-            euclidean_distance = None
-            container = "Unexpected number of clusters:", len(cluster_centers)
-            print("Unexpected number of clusters:", len(cluster_centers))
+            # Filter all relevant rows in one operation
+            samples = [valid_raw_data[valid_raw_data.index.str.contains(id)] for id in sample_ids]
+            samples_df = pd.concat(samples)
+            print(samples_df)
 
-    else:
-        return {}, 'Not enough dimensions for clustering'
+            samples_list = samples_df.values.tolist()
+            array_list = [np.array(sublist) for sublist in samples_list]
+
+            if len(array_list) == 0:
+                print('Array list is empty for project: ', project["id"])
+            else:
+                needle = get_generalised_needle_value(array_list)
+                if id not in project_needles:
+                    project_needles[id] = needle
+                else:
+                    if needle > project_needles[id]:
+                        project_needles[id] = needle
+
+                print('Project ID is: ', id)
+                print('Needle generalised: ', project_needles[id]) 
+
     
+    print('project needles: ', project_needles)
 
-    # Prepare DataFrame for Plotly
-    df = pd.DataFrame(pca_results, columns=['PC1', 'PC2'])
-    df['Cluster'] = labels  # Add cluster labels as a column
 
-    # Create a 2D scatter plot
-    fig = px.scatter(
-        df, x='PC1', y='PC2', color='Cluster', 
-        title="PCA Clustering Visualization", 
-        labels={'Cluster': 'Cluster'}, color_continuous_scale='Bluered_r'
-    )
-
-    return fig, container
- 
-    #plotting the results:
+    plot_data = {"x": list(project_needles.keys()), 
+                "y": list(project_needles.values())}
+    return plot_data
     
-    #for i in u_labels:
-     #   plt.scatter(array_for_kmeans[labels == i , 0] , array_for_kmeans[labels == i , 1] , labels = i)
-    #plt.legend()
-    #plt.show()
-
-
 
 
 if __name__ == '__main__':
