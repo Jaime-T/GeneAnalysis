@@ -50,9 +50,12 @@ These need to be installed separately with a package manager such as pip, e.g. '
  
 2.4. How to run the program
  
-  1)Clone the Github repository (See Section 2.1.)
-  2)Change the squlite database query path to access the location of where you have the file. This will need to be done in the ‘get_gene_acceptor_data’ and ‘get_raw_expression_data’   function. For example: conn = sqlite3.connect('/Users/folder/example/jc_custom_STARjunc.sqlite')
-  3) Run the program by typing into the terminal 'python3 squlite_visualization.py' and press Enter
+  1) Clone the Github repository (See Section 2.1.)
+     
+  2) Change the squlite database query path to access the location of where you have the file. This will need to be done in the ‘get_gene_acceptor_data’ and ‘get_raw_expression_data’   function. For example: conn = sqlite3.connect('/Users/folder/example/jc_custom_STARjunc.sqlite')
+     
+  3)  Run the program by typing into the terminal 'python3 squlite_visualization.py' and press Enter
+     
   4) Wait for the program to load. Copy the http URL and paste it into a web browser
  
 Key features
@@ -64,6 +67,7 @@ The first dropdown menu 'Select Gene' allows the user to choose which gene is st
 The second dropdown menu 'Show or hide range slider' enables or disables the range slider for the needle plot. The slider is below the needle plot. The range slider allows you to see a window of acceptors.
 The third dropdown menu 'maximum needle value' allows the user to pick a value that caps the value of the needles.
 The fourth dropdown menu 'Needle value options' allows the user to choose the actual needle value or the logarithm of the needle value, which is useful when the needles are really large, and exceed the maximum needle values.
+
 3.2. Acceptor site Needle Plot
  
 The first needleplot displays the exon acceptor sites along the x-axis and the needle value along the y-axis. The needle value represents the significance of the reads at that acceptor. If the treatments have had an impact on the expression, compared to the controls, then the needle value will be higher, allowing the user to identify exons that are targeted by the splicing modulator compounds.
