@@ -56,6 +56,7 @@ These need to be installed separately with a package manager such as pip, e.g. '
   4) Wait for the program to load. Copy the http URL and paste it into a web browser
  
 Key features
+
 3.1. Drop down selection boxes
  
 There are multiple drop down boxes in the webapp which allow the user to choose a value.
