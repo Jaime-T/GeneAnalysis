@@ -26,6 +26,7 @@ from scipy import special
 import json
 import math
 from sklearn.decomposition import PCA
+import plotly.graph_objects as go
 
 description_data = """
  SRR15622469 - DMSO control_1
@@ -577,19 +578,6 @@ def calc_LR_general(r_list, prior_count=1):
                                       alpha = np.full((r_list[0].shape[0],), prior_count)))# alphas calculated using raw counts+1, to test against the background  
     return LR
 
-calc_LR(np.array([1,5,2]),np.array([1,3,10]))
-
-calc_LR_general([np.array([1,5,2]),np.array([1,3,10])])
-
-
-calc_LR_general([np.array([1,2,2]),
-                 np.array([1,5,20]),
-                 np.array([1,3,20]),
-                 np.array([1,3,20])
-                 ])
-
-
-
 
 def get_needle_value(mean, indiv_sample):
     bayes_factor = calc_LR(mean,indiv_sample,7)
@@ -733,6 +721,9 @@ def heatmap(slct_gene, slct_acceptor):
 
     # Filter the DataFrame to include only the valid columns plus 'Samples'
     prop_data = prop_data.loc[:, ['Samples'] + valid_columns[valid_columns].index.tolist()]  
+
+    # Raw  read data for the valid columns 
+    raw_read_data = custom_data_raw.loc[:, ['Samples'] + valid_columns[valid_columns].index.tolist()]  
     
     # Visualize data as a heatmap
     annotation_map = temp_acceptor_custom_annotation.set_index('start')['annotation'].to_dict()
@@ -745,34 +736,56 @@ def heatmap(slct_gene, slct_acceptor):
         container = container = f"The acceptor and gene chosen by user was: {slct_acceptor}, {slct_gene}.\n Not enough donors for this acceptor"
         return {}, {}, container
 
-    # change sampleid to sample name of condition, using the sample_condition dict 
-    # case: if id doesnt exist in dict, then keep its SSR value
+    # Map sample IDs to sample names using sample_condition, falling back to original ID if not found
     new_index = [sample_condition.get(i,i) for i in heatmap_data.index] 
     heatmap_data.index = new_index
-    
+    raw_read_data.index = new_index
+
     # sort in alphabetical order
     heatmap_data = heatmap_data.sort_index()
+    raw_read_data = raw_read_data.loc[heatmap_data.index]
 
+    # Verify alignment
+    if not raw_read_data.index.equals(heatmap_data.index):
+        raise ValueError("raw_read_data and heatmap_data indices are not aligned!")
+
+    # Prepare custom x-axis labels with annotations
     custom_xtick_labels = [f"{col}\n({annotation_map.get(int(col), 'N/A')})" for col in heatmap_data.columns]
 
-    # Plotly Express heatmap
-    fig = px.imshow(heatmap_data, 
-                    labels=dict(x="Acceptor sites", y="Sample ID", color="Proportion"),
-                    x=custom_xtick_labels,
-                    y=heatmap_data.index,
-                    text_auto=".2f", 
-                    aspect="auto",
-                    color_continuous_scale='Viridis')
+    # Prepare custom hover text by combining values from heatmap_data and raw_read_data
+    hover_text = [[f"Sample: {row}<br>Site: {col}<br>Proportion: {heatmap_data.loc[row, col]:.2f}<br>Reads: {raw_read_data.loc[row, col]:.2f}"
+                for col in heatmap_data.columns] for row in heatmap_data.index]
+
+    # Prepare text for displaying proportions on the heatmap
+    text_data = [[f"{heatmap_data.loc[row, col]:.2f}" for col in heatmap_data.columns] for row in heatmap_data.index]
+
+    # Create the heatmap
+    fig = go.Figure(data=go.Heatmap(
+        z=heatmap_data.values,
+        x=custom_xtick_labels,
+        y=heatmap_data.index,
+        text=text_data,   
+        hovertext=hover_text,
+        hoverinfo="text+z", 
+        colorscale='Viridis'
+    ))
+
+    # Set the texttemplate to show the proportion values on each cell
+    fig.update_traces(texttemplate="%{text}", textfont={"size": 10}, text=text_data)
+
+    # Update layout settings
     fig.update_layout(
+        title="Heatmap with Raw Read Data as Hover",
         height=800,
+        xaxis=dict(title="Donor sites"),
         yaxis=dict(
+            title='Sample label',  
             automargin=True,
-            title='Sample ID',  
             tickmode='linear'  # Ensures ticks are shown at regular intervals
         ),
-        margin=dict(l=60, r=20, t=40, b=40)  
+        margin=dict(l=60, r=20, t=40, b=40)
     )
-                    
+
     return heatmap_data, fig, container
 
 
@@ -844,7 +857,7 @@ app.layout = html.Div([
 def render_content(tab):
     if tab == 'gene_tab': # Gene View 
         return html.Div([
-            html.H3('Gene View!'),
+            html.H3('Gene View'),
             html.P("Select Gene:"),
 
             dcc.Dropdown(id="slct_gene",
@@ -923,7 +936,9 @@ def render_content(tab):
             html.H1("Heat Map"),
             dcc.Graph(id='my_acceptor_map', figure={}),
 
-            # Centered NeedlePlot
+            # Project needle plot 
+
+            html.H2("Project-based needle plot"),
             html.Div(
                 style={
                     'display': 'flex',
@@ -936,7 +951,7 @@ def render_content(tab):
                     dashbio.NeedlePlot(
                         id='project-needleplot',
                         mutationData=needle_sample_data,
-                        xlabel='Project',
+                        xlabel='Project ID',
                         ylabel='Score',
                         width=1200,
                         domainStyle={'displayMinorDomains': True}
@@ -949,14 +964,43 @@ def render_content(tab):
     elif tab == 'exper_tab': # Experiment view
         return html.Div([
             html.H3('Experiment Tab'),
-            html.P('Still being developed! But.. you can select an experiment of interest :)'),
+            html.P('Still being developed :)'),
 
             dcc.Dropdown(id="slct_exper",
                          options=[exp["label"] for exp in experiments],
                          multi=False,
                          value='DMSO vs 40 nM branaplam',
                          style={'width': "40%"}
-                         )
+                         ),
+            html.P("Select Gene:"),
+
+            dcc.Dropdown(id="slct_gene",
+                        options=gene_options,
+                        multi=False,
+                        value='SMN2', # default value
+                        style={'width': "40%", 'display':'inline-block'}
+                        ),
+            # Project needle plot 
+            html.Div(
+                style={
+                    'display': 'flex',
+                    'justify-content': 'center',
+                    'align-items': 'center',
+                    'margin': '10px',
+                    'width': '90%'
+                },
+                children=[
+                    dashbio.NeedlePlot(
+                        id='project-needleplot',
+                        mutationData=needle_sample_data,
+                        xlabel='Project ID',
+                        ylabel='Score',
+                        width=1200,
+                        domainStyle={'displayMinorDomains': True}
+                    )
+                ]
+            ), 
+            html.Div(id='project_clicked')
         ])
 
 
@@ -982,8 +1026,6 @@ def update_needleplot(selected_gene, needle_max, needle_option):
 
     # find max needle value for each acceptor
     acceptor_needles = {}
-    project_needles = {}
-
 
     for acceptor in canonical_acceptors:
         
@@ -1024,26 +1066,12 @@ def update_needleplot(selected_gene, needle_max, needle_option):
             
             # Calculate all needles at once
             needles = treatment_samples_df.apply(lambda row: get_needle_value(control_avg, row), axis=1)
-            #print('all needles:', needles)
 
             # Get the maximum needle value
             max_needle = needles.max()
 
             # Update the acceptor_needles dictionary
             acceptor_needles[str(acceptor)] = max(max_needle, acceptor_needles[str(acceptor)])
-            #print('new max is:', acceptor_needles[str(acceptor)] )
-
-            label = experiment["label"]
-            ''' 
-            if label == 'Treated_SMA vs Control_FB13' and acceptor == 226071350:
-                print('gene is: ' + str(selected_gene) + 'acceptor is: ' + str(acceptor) + 'label: ' + label)
-                print('treatment samples: ')
-                print(treatment_samples_df)
-                print('control sample: ')
-                print(control_samples_df)
-                print('needle values would be... ', needles)
-
-            '''
 
         coord = str(acceptor) + '-' + str(acceptor + 100)
         domains.append({"name": str(acceptor), "coord": coord})
@@ -1056,7 +1084,6 @@ def update_needleplot(selected_gene, needle_max, needle_option):
         acceptor_needles = {key: min(needle_max,value) for key, value in acceptor_needles.items()}
     
     print('Acceptor needles ',acceptor_needles)
-    print('project needles: ', project_needles)
 
     plot_data = {"x": list(acceptor_needles.keys()), 
                 "y": list(acceptor_needles.values()), 
@@ -1130,9 +1157,9 @@ def update_proj_needleplot(selected_gene):
     if len(canonical_acceptors) == 0:
         return needle_sample_data
 
-
     # find max needle value for each project
     project_needles = {}
+    print(canonical_acceptors)
 
     for acceptor in canonical_acceptors:
         
@@ -1146,43 +1173,84 @@ def update_proj_needleplot(selected_gene):
         
         if valid_raw_data is None or valid_raw_data.empty:
             continue
-        
+
+        print('\nAcceptor is: ', acceptor)
         
         for project in projects:
             id = str(project["id"])
-
-            print('\n')
+            
+            
             sample_ids = project["samples"]
 
-            # Filter all relevant rows in one operation
+            # Filter all relevant rows 
             samples = [valid_raw_data[valid_raw_data.index.str.contains(id)] for id in sample_ids]
             samples_df = pd.concat(samples)
-            print(samples_df)
 
             samples_list = samples_df.values.tolist()
             array_list = [np.array(sublist) for sublist in samples_list]
 
             if len(array_list) == 0:
-                print('Array list is empty for project: ', project["id"])
+                continue
             else:
                 needle = get_generalised_needle_value(array_list)
+                
                 if id not in project_needles:
                     project_needles[id] = needle
                 else:
                     if needle > project_needles[id]:
                         project_needles[id] = needle
 
-                print('Project ID is: ', id)
-                print('Needle generalised: ', project_needles[id]) 
-
     
     print('project needles: ', project_needles)
+    
+    # getting label for each experiment 
+    # Step 1: Create mappings for treatment and control samples to their respective labels
+    sample_to_labels = {}
+    for experiment in experiments:
+        experiment_label = experiment["label"]
+        for sample in experiment["treatment"] + experiment["control"]:
+            sample_to_labels.setdefault(sample, []).append(experiment_label)
+
+    # Step 2: Populate project_label by looking up samples in the sample_to_labels dictionary
+    project_label = {}
+    for proj in projects:
+        project_id = proj["id"]
+        # Use a set to avoid duplicate labels
+        labels = set()
+        for sample in proj["samples"]:
+            # Retrieve labels if sample is in sample_to_labels, otherwise default to an empty list
+            labels.update(sample_to_labels.get(sample, []))
+        # Convert set to list for the final output
+        project_label[project_id] = list(labels)
+
+    print(project_label)
+
 
 
     plot_data = {"x": list(project_needles.keys()), 
-                "y": list(project_needles.values())}
+                "y": list(project_needles.values()),
+                "hover_data": [project_label[proj_id] for proj_id in project_needles.keys()] # Hover labels}
+    }
+
+    # Convert the hover data lists to strings for better display in Plotly
+    plot_data["hover_data"] = [', '.join(labels) for labels in plot_data["hover_data"]]
+    print(plot_data)
     return plot_data
     
+@app.callback(
+    Output(component_id='project_clicked', component_property='children'),
+    Input(component_id='project-needleplot', component_property='clickData')
+)
+
+def update_acceptor_value(clickData):
+    # Check if clickData is None
+    if clickData is None:
+        return "No project selection"  # or any default value you want to return
+
+    print('clickdata', clickData)
+    project_id = clickData['points'][0]['x']
+    print('project id is', project_id)
+    return f'Project selected is {project_id}'
 
 
 if __name__ == '__main__':
