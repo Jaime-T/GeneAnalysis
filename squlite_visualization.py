@@ -21,6 +21,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import plotly.express as px
 from dash import Dash, html, dcc, Input, Output
+import argparse
 import dash_bio as dashbio
 from scipy import special
 import json
@@ -819,6 +820,7 @@ def get_acceptor_coords(gene_name, acceptor):
 
 gene_options = [{"label": gene, "value": gene} for gene in get_all_ensembl_genes()]
 
+
 # Needle sample data:
 needle_sample_data = {
     'x': ['271.0-279.0', '808.0-825.0', '661.0-672.0'], 
@@ -834,20 +836,6 @@ needle_sample_data = {
 ## Start App
 app = Dash(__name__, suppress_callback_exceptions=True, external_stylesheets=['https://codepen.io/chriddyp/pen/bWLwgP.css'])
 
-# App layout
-app.layout = html.Div([
-    html.H1("Proportion of Counts in an Acceptor", style={'text-align': 'center'}),
-
-    # Gene View or Experiment View, choose a tab 
-    dcc.Tabs(id='gene_or_exper_tab', value='gene_tab', children=[
-        dcc.Tab(label='Gene View', value='gene_tab'),
-        dcc.Tab(label='Experiment View', value='exper_tab'),
-    ]),
-    html.Div(id='gene_or_exper_tab_content'),
-
-
-
-])
 
 @app.callback(
     Output(component_id='gene_or_exper_tab_content', component_property='children'),
@@ -855,6 +843,7 @@ app.layout = html.Div([
 )
 
 def render_content(tab):
+    print('Rendredd contexbt')
     if tab == 'gene_tab': # Gene View 
         return html.Div([
             html.H3('Gene View'),
@@ -1082,8 +1071,7 @@ def update_needleplot(selected_gene, needle_max, needle_option):
     
     else:
         acceptor_needles = {key: min(needle_max,value) for key, value in acceptor_needles.items()}
-    
-    print('Acceptor needles ',acceptor_needles)
+
 
     plot_data = {"x": list(acceptor_needles.keys()), 
                 "y": list(acceptor_needles.values()), 
@@ -1159,7 +1147,6 @@ def update_proj_needleplot(selected_gene):
 
     # find max needle value for each project
     project_needles = {}
-    print(canonical_acceptors)
 
     for acceptor in canonical_acceptors:
         
@@ -1173,8 +1160,6 @@ def update_proj_needleplot(selected_gene):
         
         if valid_raw_data is None or valid_raw_data.empty:
             continue
-
-        print('\nAcceptor is: ', acceptor)
         
         for project in projects:
             id = str(project["id"])
@@ -1201,8 +1186,6 @@ def update_proj_needleplot(selected_gene):
                         project_needles[id] = needle
 
     
-    print('project needles: ', project_needles)
-    
     # getting label for each experiment 
     # Step 1: Create mappings for treatment and control samples to their respective labels
     sample_to_labels = {}
@@ -1223,7 +1206,7 @@ def update_proj_needleplot(selected_gene):
         # Convert set to list for the final output
         project_label[project_id] = list(labels)
 
-    print(project_label)
+    #print(project_label)
 
 
 
@@ -1234,7 +1217,7 @@ def update_proj_needleplot(selected_gene):
 
     # Convert the hover data lists to strings for better display in Plotly
     plot_data["hover_data"] = [', '.join(labels) for labels in plot_data["hover_data"]]
-    print(plot_data)
+    #print(plot_data)
     return plot_data
     
 @app.callback(
@@ -1247,14 +1230,30 @@ def update_acceptor_value(clickData):
     if clickData is None:
         return "No project selection"  # or any default value you want to return
 
-    print('clickdata', clickData)
+    #('clickdata', clickData)
     project_id = clickData['points'][0]['x']
     print('project id is', project_id)
     return f'Project selected is {project_id}'
 
 
 if __name__ == '__main__':
-    app.run(debug=True) 
+    parser = argparse.ArgumentParser(description='Run Dash application.')
+    parser.add_argument('-p', '--port', type=int, default=8050, help='Port number to run the application on.')
+    args = parser.parse_args()
+
+    # App layout
+    app.layout = html.Div([
+        html.H1("Proportion of Counts in an Acceptor", style={'text-align': 'center'}),
+
+        # Gene View or Experiment View, choose a tab 
+        dcc.Tabs(id='gene_or_exper_tab', value='gene_tab', children=[
+            dcc.Tab(label='Gene View', value='gene_tab'),
+            dcc.Tab(label='Experiment View', value='exper_tab'),
+        ]),
+        html.Div(id='gene_or_exper_tab_content'),
+    ])
+
+    app.run_server(debug=True, port=args.port) # Use the port from command-line arguments
 
 
 

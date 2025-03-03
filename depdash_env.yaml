@@ -1,0 +1,20 @@
+name: depdash_env
+channels:
+  - bioconda
+  - conda-forge
+  - anaconda
+dependencies:
+  - pandas
+  - requests
+  - numpy
+  - sqlite3
+  - matplotlib.pyplot 
+  - seaborn
+  - plotly.express
+  - dash
+  - dash_bio
+  - json
+  - math
+  - sklearn.decomposition
+
+
